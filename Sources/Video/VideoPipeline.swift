@@ -42,6 +42,10 @@ final class FrameQueue: @unchecked Sendable {
     static let maximumWidth = 640
     static let maximumHeight = 512
     private static let bufferCount = 3
+    /// Bytes in one buffer. Static rather than an instance property because
+    /// `init` allocates from it, and an instance property would be a `self`
+    /// reference inside the closure, before `buffers` has been assigned.
+    private static let bytesPerBuffer = maximumWidth * maximumHeight * 4
 
     private struct State {
         /// Index the producer is currently filling.
@@ -56,13 +60,12 @@ final class FrameQueue: @unchecked Sendable {
     }
 
     private let buffers: [UnsafeMutablePointer<UInt8>]
-    private let bytesPerBuffer = maximumWidth * maximumHeight * 4
     private let state = Locked(State())
 
     init() {
         buffers = (0..<Self.bufferCount).map { _ in
-            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bytesPerBuffer)
-            buffer.initialize(repeating: 0, count: bytesPerBuffer)
+            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: Self.bytesPerBuffer)
+            buffer.initialize(repeating: 0, count: Self.bytesPerBuffer)
             return buffer
         }
     }
