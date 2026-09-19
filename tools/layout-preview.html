@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<!--
+  layout-preview.html — a diagram of ControlLayout, for tuning the on-screen
+  controls without building and sideloading.
+
+  This is not the app. It re-derives the same numbers that ControlLayout.init and
+  drawPill use, on a canvas, so a placement question ("is L reachable?") can be
+  answered by looking rather than by installing a build. If a value here disagrees
+  with Sources/Input/TouchControls.swift, the Swift is right and this file is stale.
+
+  Open it directly, or from the repo: no build, no dependencies.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Earthbound Wrapper — control layout</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 20px; background: #111; color: #ddd;
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
+  p.note { margin: 0 0 16px; color: #888; max-width: 60ch; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+              margin-bottom: 16px; }
+  label { display: flex; gap: 8px; align-items: center; color: #aaa; }
+  input[type=range] { width: 130px; }
+  select, input[type=checkbox] { accent-color: #6cf; }
+  canvas { display: block; border-radius: 10px; background: #000; }
+  output { color: #6cf; font-variant-numeric: tabular-nums; }
+  .readout { color: #888; font-size: 12px; margin-top: 10px;
+             font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<h1>Control layout</h1>
+<p class="note">
+  Same formulas as <code>ControlLayout</code>. The grey rectangle is the game picture
+  when it is aspect-correct; <em>Widen</em> pushes it out to the screen edges the way
+  the display setting does, which is the case where controls sit over the game.
+</p>
+
+<div class="controls">
+  <label>Device
+    <select id="device">
+      <option value="667x375">iPhone SE — 667×375</option>
+      <option value="852x393" selected>iPhone 15/16 — 852×393</option>
+      <option value="956x440">iPhone 16 Pro Max — 956×440</option>
+      <option value="1133x744">iPad mini — 1133×744</option>
+    </select>
+  </label>
+  <label>Control size <input id="scale" type="range" min="0.8" max="1.4" step="0.05" value="1.0">
+    <output id="scaleOut">100%</output></label>
+  <label>Widen <input id="stretch" type="range" min="0" max="1" step="0.05" value="0">
+    <output id="stretchOut">0%</output></label>
+  <label><input id="pads" type="checkbox" checked> Show hit areas</label>
+</div>
+
+<canvas id="c" width="852" height="393"></canvas>
+<div class="readout" id="readout"></div>
+
+<script>
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+// ---- mirrors ControlLayout.init -------------------------------------------
+function layout(w, h, scale) {
+  const s = clamp(scale, 0.8, 1.4);
+
+  // Stick
+  const wellRadius = clamp(h * 0.19, 54, 84) * s;
+  const nubRadius  = wellRadius * 0.44;
+
+  // Face cluster
+  const base = clamp(h * 0.0745, 27, 40);
+  const r = base * s;
+  const spread = r * 1.65;
+  const extent = r + spread;
+  const trailingMargin = Math.max(base * 0.5, 14);
+  const bottomMargin   = Math.max(base * 0.6, 16);
+  const cx = w - trailingMargin - extent;
+  const cy = h - bottomMargin - extent;
+
+  const face = [
+    { b: 'X', x: cx,         y: cy - spread, r },
+    { b: 'Y', x: cx - spread, y: cy,         r },
+    { b: 'A', x: cx + spread, y: cy,         r },
+    { b: 'B', x: cx,         y: cy + spread, r },
+  ];
+
+  // Shoulders: stacked in the right margin, above the cluster
+  const sr = r * 1.3;
+  const pillH = sr * 1.15;
+  const clusterTop = cy - extent;
+  const topLimit = pillH * 0.5 + 6;
+  const lowerY = clusterTop - sr * 0.4 - pillH * 0.5;
+  const room = Math.max(lowerY - pillH - topLimit, 0);
+  const gap = Math.min(pillH * 0.35, room);
+  const upperY = lowerY - pillH - gap;
+  const shoulders = [
+    { b: 'L', x: cx, y: lowerY, r: sr },
+    { b: 'R', x: cx, y: upperY, r: sr },
+  ];
+
+  return { w, h, scale: s, wellRadius, nubRadius, face, shoulders, spread, r,
+           pillH, clusterTop, cx, cy, extent, lowerY, upperY, gap };
+}
+
+// ---- picture rect, mirroring the renderer ---------------------------------
+// A SNES frame is 4:3. "Fit" letterboxes it to the screen height; stretch
+// interpolates from that out to the full width, as DisplaySettings.stretch does.
+function picture(w, h, stretch) {
+  const native = Math.min(w, h * 4 / 3);
+  const width = native + (w - native) * stretch;
+  return { x: (w - width) / 2, width, height: h };
+}
+
+// ---- drawing ---------------------------------------------------------------
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+
+function drawRing(x, y, radius, fill, stroke, width) {
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = fill; ctx.fill();
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width || 1.5; ctx.stroke(); }
+}
+
+function drawPill(x, y, radius, height, fill, stroke, label) {
+  const w = radius * 2, h = height;
+  const rr = h / 2;
+  ctx.beginPath();
+  ctx.moveTo(x - w / 2 + rr, y - h / 2);
+  ctx.lineTo(x + w / 2 - rr, y - h / 2);
+  ctx.arcTo(x + w / 2, y - h / 2, x + w / 2, y, rr);
+  ctx.arcTo(x + w / 2, y + h / 2, x + w / 2 - rr, y + h / 2, rr);
+  ctx.lineTo(x - w / 2 + rr, y + h / 2);
+  ctx.arcTo(x - w / 2, y + h / 2, x - w / 2, y, rr);
+  ctx.arcTo(x - w / 2, y - h / 2, x - w / 2 + rr, y - h / 2, rr);
+  ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
+  if (label) {
+    ctx.fillStyle = 'rgba(255,255,255,.7)';
+    ctx.font = `600 ${h * 0.44}px ui-rounded, -apple-system, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, x, y);
+  }
+}
+
+function render() {
+  const [dw, dh] = document.getElementById('device').value.split('x').map(Number);
+  const scale = parseFloat(document.getElementById('scale').value);
+  const stretch = parseFloat(document.getElementById('stretch').value);
+  const showPads = document.getElementById('pads').checked;
+
+  document.getElementById('scaleOut').textContent = Math.round(scale * 100) + '%';
+  document.getElementById('stretchOut').textContent = Math.round(stretch * 100) + '%';
+  c.width = dw; c.height = dh;
+  c.style.width = dw + 'px';
+  c.style.height = dh + 'px';
+
+  const L = layout(dw, dh, scale);
+  const P = picture(dw, dh, stretch);
+
+  ctx.clearRect(0, 0, dw, dh);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, dw, dh);
+
+  // The game picture.
+  ctx.fillStyle = 'rgba(120,150,190,.16)';
+  ctx.fillRect(P.x, P.y, P.width, P.height);
+  ctx.strokeStyle = 'rgba(140,180,230,.35)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(P.x + .5, P.y + .5, P.width - 1, P.height - 1);
+
+  // Stick, at rest, as a hint.
+  const stick = { x: dw * 0.16, y: dh * 0.70 };
+  drawRing(stick.x, stick.y, L.wellRadius, 'rgba(255,255,255,.10)', 'rgba(255,255,255,.22)');
+  drawRing(stick.x, stick.y, L.nubRadius, 'rgba(255,255,255,.55)', 'rgba(255,255,255,.9)');
+
+  // Shoulders.
+  L.shoulders.forEach(s => drawPill(s.x, s.y, s.r, L.pillH,
+    'rgba(255,255,255,.13)', 'rgba(255,255,255,.26)', s.b));
+
+  // Face cluster, filled as one shape so the overlaps do not composite twice.
+  ctx.save();
+  ctx.beginPath();
+  L.face.forEach(f => { ctx.moveTo(f.x + f.r, f.y); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); });
+  ctx.fillStyle = 'rgba(255,255,255,.10)';
+  ctx.fill();
+  ctx.restore();
+  L.face.forEach(f => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.r + 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.17)';
+    ctx.fill();
+    ctx.restore();
+  });
+  ctx.save();
+  ctx.beginPath();
+  L.face.forEach(f => { ctx.moveTo(f.x + f.r, f.y); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); });
+  ctx.fillStyle = 'rgba(255,255,255,.10)';
+  ctx.fill();
+  ctx.restore();
+  L.face.forEach(f => {
+    ctx.fillStyle = 'rgba(255,255,255,.62)';
+    ctx.font = `600 ${f.r * 0.78}px ui-rounded, -apple-system, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(f.b, f.x, f.y);
+  });
+
+  // Hit areas: the circles a touch is actually tested against, including slack.
+  if (showPads) {
+    ctx.strokeStyle = 'rgba(255,120,120,.45)';
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    [...L.face, ...L.shoulders].forEach(s => {
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, (s.r || L.r) + 12, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+
+  // Chrome, so the top-left does not look mysteriously empty.
+  drawRing(12 + 23, 8 + 23, 23, 'rgba(0,0,0,.35)', null);
+  ctx.fillStyle = 'rgba(255,255,255,.9)';
+  ctx.font = '600 17px ui-rounded, -apple-system, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('☰', 35, 32);
+  drawPill(64 + 33, 28, 33, 40, 'rgba(0,0,0,.35)', null, null);
+  ctx.font = '600 14px ui-rounded, -apple-system, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,.9)';
+  ctx.fillText('SAVE', 97, 28);
+  drawPill(64 + 66 + 8 + 22, 28, 22, 40, 'rgba(0,0,0,.35)', null, null);
+  ctx.fillText('4x', 64 + 66 + 8 + 22, 28);
+
+  const gapToPad = (L.clusterTop - (L.lowerY + L.pillH / 2)).toFixed(1);
+  document.getElementById('readout').textContent =
+    `button Ø ${(2 * L.r).toFixed(1)}pt   spread ${L.spread.toFixed(1)}   ` +
+    `cluster ${L.extent.toFixed(1)} from corner   ` +
+    `L/R pill ${((L.shoulders[0].r) * 2).toFixed(1)}×${L.pillH.toFixed(1)}   ` +
+    `L→pad gap ${gapToPad}pt   R top ${(L.upperY - L.pillH / 2).toFixed(1)}pt   ` +
+    `picture x ${P.x.toFixed(0)}..${(P.x + P.width).toFixed(0)}`;
+}
+
+['device', 'scale', 'stretch', 'pads'].forEach(id =>
+  document.getElementById(id).addEventListener('input', render));
+render();
+</script>
+</body>
+</html>

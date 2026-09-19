@@ -12,6 +12,11 @@ on:
     branches: [main, master]
     paths-ignore:
       - "**/*.md"
+      # Documentation and the layout mock cannot change the binary, and a macOS
+      # runner minute spent proving that is a minute not spent on the build.
+      - "tools/**"
+      - "LICENSE"
+      - "CONTRIBUTING.md"
   pull_request:
   workflow_dispatch:
     inputs:
