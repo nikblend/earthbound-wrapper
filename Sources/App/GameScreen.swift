@@ -53,6 +53,10 @@ struct GameScreen: View {
 
                     topBar(runtime: runtime, safeArea: proxy.safeAreaInsets)
 
+                    if let toast = runtime.toast {
+                        toastOverlay(toast)
+                    }
+
                     if let failure = runtime.failureMessage {
                         failureOverlay(message: failure)
                     }
@@ -71,6 +75,7 @@ struct GameScreen: View {
                 lastSize = newSize
                 lastSafeArea = proxy.safeAreaInsets
             }
+            .animation(.easeOut(duration: 0.16), value: runtime?.toast)
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
@@ -98,14 +103,50 @@ struct GameScreen: View {
     // MARK: - Chrome
 
     private func topBar(runtime: GameRuntime, safeArea: EdgeInsets) -> some View {
-        HStack(spacing: 10) {
-            // Offset past the controls' own menu button, which sits in the overlay.
+        HStack(spacing: 8) {
+            saveStateButton(runtime: runtime)
             fastForwardButton(runtime: runtime)
-                .padding(.leading, 54)
             Spacer()
         }
+        // Offset past the controls' own menu button, which sits in the overlay and
+        // occupies the first 58 points of the top edge.
+        .padding(.leading, 64)
         .padding(.top, safeArea.top + 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Saves into the slot chosen in settings, and names it on screen afterwards.
+    ///
+    /// One tap rather than a menu: this exists to replace reaching for the game's own
+    /// save, so it has to be faster than the thing it replaces.
+    private func saveStateButton(runtime: GameRuntime) -> some View {
+        Button {
+            runtime.saveState(to: .manual(settings.quickSaveSlot))
+        } label: {
+            Text("SAVE")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.9))
+                .padding(.horizontal, 16)
+                .frame(height: 40)
+                .background(.black.opacity(0.35), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A brief confirmation. Deliberately not an alert: saving is frequent, and
+    /// anything that interrupts play to say it worked is worse than not saying it.
+    private func toastOverlay(_ message: String) -> some View {
+        Text(message)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.75), in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, 56)
+            .allowsHitTesting(false)
     }
 
     private func fastForwardButton(runtime: GameRuntime) -> some View {
@@ -195,7 +236,7 @@ struct GameScreen: View {
             // touchesEnded never arrives would otherwise stay held through the whole
             // background period and resume mid-stride.
             runtime?.gamepad.releaseAll()
-            runtime?.session.saveState()
+            runtime?.session.saveState(to: .auto)
             runtime?.session.flushSRAM()
             isFastForwarding = false
             runtime?.setFastForwarding(false)

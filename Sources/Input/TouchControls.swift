@@ -74,10 +74,21 @@ struct ControlLayout {
         // SNES physical layout: X on top, Y on the left, A on the right, B on the
         // bottom. Preserving it matters more than ergonomics here, because muscle
         // memory from the real controller is the whole point.
-        let buttonRadius = min(max(size.height * 0.085, 26), 40)
-        let spread = buttonRadius * 1.62
-        let clusterCenter = CGPoint(x: size.width - safeArea.trailing - buttonRadius * 2.9,
-                                    y: size.height - safeArea.bottom - buttonRadius * 3.1)
+        // Placed from the two edges rather than by a multiplier on the button size, so
+        // that what is being chosen is how far the cluster sits from the corner. A
+        // diamond's half-extent is `radius + spread`, and both margins are small: the
+        // cluster belongs in the corner, over the part of a 2D RPG's picture that
+        // nothing important ever occupies.
+        let buttonRadius = min(max(size.height * 0.0687, 26), 38)
+        // 1.55 rather than 2. Four circles that merely touched would make the cluster
+        // half again as wide, and width is the dimension that covers the game.
+        let spread = buttonRadius * 1.55
+        let clusterExtent = buttonRadius + spread
+        let trailingMargin = max(buttonRadius * 0.5, 14)
+        let bottomMargin = max(buttonRadius * 0.6, 16)
+        let clusterCenter = CGPoint(
+            x: size.width - safeArea.trailing - trailingMargin - clusterExtent,
+            y: size.height - safeArea.bottom - bottomMargin - clusterExtent)
         faceButtons = [
             ButtonSlot(button: .x, center: CGPoint(x: clusterCenter.x, y: clusterCenter.y - spread),
                        radius: buttonRadius),
@@ -93,7 +104,10 @@ struct ControlLayout {
         // Stacked above the face cluster rather than at the top corners of the
         // screen. On a phone held in landscape the top corners are a stretch away
         // from the thumb, which is exactly where L and R must not be.
-        let shoulderSize = CGSize(width: buttonRadius * 2.6, height: buttonRadius * 1.15)
+        // Scaled from the button radius so the two stay in proportion, but a little
+        // wider: L and R are pressed with the side of a thumb, which wants a longer
+        // target than a face button does.
+        let shoulderSize = CGSize(width: buttonRadius * 3.0, height: buttonRadius * 1.3)
         let shoulderY = safeArea.top + shoulderSize.height * 0.5 + 6
         shoulders = [
             ButtonSlot(button: .r,
@@ -130,11 +144,23 @@ struct ControlLayout {
     func slot(at point: CGPoint) -> ButtonSlot? {
         // Shoulders and system buttons are drawn as pills but hit-tested as
         // circles; on a target this small the difference is not worth the code.
-        allButtonSlots.first { slot in
+        //
+        // The nearest match rather than the first. Neighbours in the face cluster
+        // overlap deliberately, so "first wins" would hand a press aimed at one button
+        // to whichever happened to appear earlier in the array. Scoring by how far past
+        // a button's own edge the touch landed, rather than by distance to its centre,
+        // is what keeps the pills and the circles comparable.
+        var best: ButtonSlot?
+        var bestOvershoot = CGFloat.greatestFiniteMagnitude
+        for slot in allButtonSlots {
             let dx = point.x - slot.center.x
             let dy = point.y - slot.center.y
-            return (dx * dx + dy * dy).squareRoot() <= slot.radius + Self.holdSlop
+            let overshoot = (dx * dx + dy * dy).squareRoot() - slot.radius
+            guard overshoot <= Self.holdSlop, overshoot < bestOvershoot else { continue }
+            bestOvershoot = overshoot
+            best = slot
         }
+        return best
     }
 }
 
@@ -397,8 +423,57 @@ struct TouchControlsOverlay: View {
     private func draw(in context: inout GraphicsContext) {
         drawStick(in: &context)
         for slot in model.layout.shoulders { drawPill(slot, in: &context, isHeld: gamepad.isHeld(slot.button)) }
-        for slot in model.layout.faceButtons { drawCircle(slot, in: &context, isHeld: gamepad.isHeld(slot.button)) }
+        drawFaceCluster(in: &context)
         for slot in model.layout.systemButtons { drawPill(slot, in: &context, isHeld: gamepad.isHeld(slot.button)) }
+    }
+
+    /// The four face buttons as one cluster.
+    ///
+    /// The circles overlap on purpose, and four separately filled translucent shapes
+    /// composite where they meet: the lens between two neighbours comes out brighter
+    /// than either of them, which is what made the cluster read as a smudge rather than
+    /// as four buttons. Filling all four ellipses as a single path fixes it, because one
+    /// fill of overlapping subpaths fills each area once.
+    ///
+    /// The rim uses the same trick — a slightly larger union in the rim colour, with the
+    /// interior drawn on top — because stroking each circle individually would draw its
+    /// arcs straight across its neighbours.
+    private func drawFaceCluster(in context: inout GraphicsContext) {
+        let slots = model.layout.faceButtons
+        guard !slots.isEmpty else { return }
+        let anyHeld = slots.contains { gamepad.isHeld($0.button) }
+
+        var rim = Path()
+        var interior = Path()
+        for slot in slots {
+            rim.addEllipse(in: circleRect(at: slot.center, radius: slot.radius + 1.5))
+            interior.addEllipse(in: circleRect(at: slot.center, radius: slot.radius))
+        }
+
+        context.fill(rim, with: .color(.white.opacity(anyHeld ? 0.44 : 0.17)))
+        context.fill(interior, with: .color(.white.opacity(anyHeld ? 0.30 : 0.10)))
+
+        // The held button is drawn on top, so a press reads clearly even when the
+        // cluster is otherwise nearly transparent over a bright scene.
+        for slot in slots where gamepad.isHeld(slot.button) {
+            let circle = Path(ellipseIn: circleRect(at: slot.center, radius: slot.radius))
+            context.fill(circle, with: .color(.white.opacity(0.45)))
+            context.stroke(circle, with: .color(.white.opacity(0.95)), lineWidth: 1.5)
+        }
+
+        for slot in slots {
+            let isHeld = gamepad.isHeld(slot.button)
+            context.draw(
+                Text(slot.button.label)
+                    .font(.system(size: slot.radius * 0.78, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(isHeld ? 1 : 0.62)),
+                at: slot.center)
+        }
+    }
+
+    private func circleRect(at center: CGPoint, radius: CGFloat) -> CGRect {
+        CGRect(x: center.x - radius, y: center.y - radius,
+               width: radius * 2, height: radius * 2)
     }
 
     private func drawStick(in context: inout GraphicsContext) {
@@ -462,21 +537,6 @@ struct TouchControlsOverlay: View {
         return abs(litIndex - index) == 1
     }
 
-    private func drawCircle(_ slot: ControlLayout.ButtonSlot, in context: inout GraphicsContext,
-                            isHeld: Bool) {
-        let rect = CGRect(x: slot.center.x - slot.radius, y: slot.center.y - slot.radius,
-                          width: slot.radius * 2, height: slot.radius * 2)
-        context.fill(Path(ellipseIn: rect),
-                     with: .color(.white.opacity(isHeld ? 0.55 : 0.16)))
-        context.stroke(Path(ellipseIn: rect),
-                       with: .color(.white.opacity(isHeld ? 0.95 : 0.35)), lineWidth: 1.5)
-        context.draw(
-            Text(slot.button.label)
-                .font(.system(size: slot.radius * 0.78, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(isHeld ? 1 : 0.75)),
-            at: slot.center)
-    }
-
     private func drawPill(_ slot: ControlLayout.ButtonSlot, in context: inout GraphicsContext,
                           isHeld: Bool) {
         let width = slot.radius * 2
@@ -484,15 +544,15 @@ struct TouchControlsOverlay: View {
         let rect = CGRect(x: slot.center.x - width / 2, y: slot.center.y - height / 2,
                           width: width, height: height)
         let shape = Path(roundedRect: rect, cornerRadius: height / 2)
-        context.fill(shape, with: .color(.white.opacity(isHeld ? 0.55 : 0.16)))
-        context.stroke(shape, with: .color(.white.opacity(isHeld ? 0.95 : 0.35)), lineWidth: 1.5)
+        context.fill(shape, with: .color(.white.opacity(isHeld ? 0.55 : 0.13)))
+        context.stroke(shape, with: .color(.white.opacity(isHeld ? 0.95 : 0.26)), lineWidth: 1.5)
         // "Select" and "Start" are long for this pill; abbreviate to keep the glyph
         // size legible.
         let label = slot.button == .select ? "SEL" : (slot.button == .start ? "ST" : slot.button.label)
         context.draw(
             Text(label)
                 .font(.system(size: height * 0.44, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(isHeld ? 1 : 0.75)),
+                .foregroundStyle(.white.opacity(isHeld ? 1 : 0.68)),
             at: slot.center)
     }
 }

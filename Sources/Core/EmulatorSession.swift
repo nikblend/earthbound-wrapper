@@ -39,13 +39,12 @@ struct RomDescriptor: Identifiable, Hashable, Sendable {
     var id: URL { url }
     var name: String { url.deletingPathExtension().lastPathComponent }
 
-    /// Where the battery-backed SRAM and the savestate live. Both derive from the
-    /// ROM name, so a game's saves travel with it.
-    var saveStateURL: URL { Self.savesDirectory.appendingPathComponent(name + ".state") }
+    /// Where the battery-backed SRAM lives, in the same directory as the savestates
+    /// that SaveSlots.swift names. Derived from the ROM name, so a game's saves
+    /// travel with the ROM file itself.
     var sramURL: URL { Self.savesDirectory.appendingPathComponent(name + ".srm") }
 
     var isPlayable: Bool { FileManager.default.fileExists(atPath: url.path) }
-    var hasSavedState: Bool { FileManager.default.fileExists(atPath: saveStateURL.path) }
     var hasSRAM: Bool { FileManager.default.fileExists(atPath: sramURL.path) }
 
     static var savesDirectory: URL {
@@ -78,9 +77,16 @@ final class EmulatorSession: @unchecked Sendable {
 
     private enum Command {
         case reset
-        case saveState
-        case loadState
+        case saveState(SaveSlot)
+        case loadState(SaveSlot)
         case flushSRAM
+    }
+
+    /// The result of the last save or load, for the UI to confirm on screen.
+    struct SaveOutcome: Sendable {
+        let slot: SaveSlot
+        let succeeded: Bool
+        let message: String
     }
 
     // MARK: - Shared state a C callback can reach
@@ -118,6 +124,9 @@ final class EmulatorSession: @unchecked Sendable {
 
     /// Latest tactile analysis, picked up by the draw loop on the main thread.
     private let tactileSlot = Locked(TactileFrame.silent)
+
+    /// Outcome of the newest save or load, waiting for the main thread to report it.
+    private let saveOutcomeStorage = Locked(SaveOutcome?.none)
 
     /// Screen refresh rate, forwarded to the core so it can pace itself.
     var targetRefreshRate: Float = 60 {
@@ -217,9 +226,23 @@ final class EmulatorSession: @unchecked Sendable {
     // MARK: - Commands (callable from any thread)
 
     func reset() { commands.withLock { $0.append(.reset) } }
-    func saveState() { commands.withLock { $0.append(.saveState) } }
-    func loadState() { commands.withLock { $0.append(.loadState) } }
+
+    /// Dumps the core's state into `slot`. Drained at the next frame boundary, so the
+    /// dump is taken between frames rather than mid-instruction.
+    func saveState(to slot: SaveSlot) { commands.withLock { $0.append(.saveState(slot)) } }
+
+    func loadState(from slot: SaveSlot) { commands.withLock { $0.append(.loadState(slot)) } }
+
     func flushSRAM() { commands.withLock { $0.append(.flushSRAM) } }
+
+    /// The newest save or load result, cleared by the read. Read-and-clear because a
+    /// confirmation nobody was left to draw is a message nobody should see.
+    func takeSaveOutcome() -> SaveOutcome? {
+        saveOutcomeStorage.withLock { outcome in
+            defer { outcome = nil }
+            return outcome
+        }
+    }
 
     func setFastForwarding(_ enabled: Bool) {
         isFastForwarding = enabled
@@ -290,7 +313,9 @@ final class EmulatorSession: @unchecked Sendable {
         // SRAM first, then the savestate: a savestate already contains the save
         // RAM it was taken with, so restoring it second is what "resume" means.
         restoreSRAMFromDisk()
-        if rom.hasSavedState { applyLoadState() }
+        // The automatic slot is the resume path, and its outcome is deliberately not
+        // published: reopening a game should not raise a banner about it.
+        if rom.hasState(in: .auto) { _ = readState(from: .auto) }
         refreshAVInfo()
 
         runFrames()
@@ -399,10 +424,10 @@ final class EmulatorSession: @unchecked Sendable {
             switch command {
             case .reset:
                 eb_retro_reset()
-            case .saveState:
-                applySaveState()
-            case .loadState:
-                applyLoadState()
+            case .saveState(let slot):
+                report(writeState(to: slot))
+            case .loadState(let slot):
+                report(readState(from: slot))
                 refreshAVInfo()
             case .flushSRAM:
                 flushSRAMToDisk()
@@ -412,34 +437,61 @@ final class EmulatorSession: @unchecked Sendable {
 
     // MARK: - Saves
 
-    private func applySaveState() {
+    /// Writes the core's state into a slot, and says what happened.
+    ///
+    /// The state size is queried on every save rather than cached: a core is free to
+    /// report a different size once content is loaded, and a stale size would quietly
+    /// truncate the dump.
+    private func writeState(to slot: SaveSlot) -> SaveOutcome {
         let size = eb_retro_serialize_size()
-        guard size > 0 else { return }
+        guard size > 0 else {
+            log.error("core has no state to serialize")
+            return SaveOutcome(slot: slot, succeeded: false,
+                               message: "The core had no state to save.")
+        }
+
         let buffer = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 16)
         defer { buffer.deallocate() }
         guard eb_retro_serialize(buffer, size) else {
             log.error("core refused to serialize")
-            return
+            return SaveOutcome(slot: slot, succeeded: false,
+                               message: "The core refused to save its state.")
         }
+
         do {
-            try Data(bytes: buffer, count: size).write(to: rom.saveStateURL, options: .atomic)
-            log.info("saved state (\(size) bytes)")
+            let url = rom.stateURL(for: slot)
+            try Data(bytes: buffer, count: size).write(to: url, options: .atomic)
+            log.info("saved \(slot.title, privacy: .public) (\(size) bytes)")
+            return SaveOutcome(slot: slot, succeeded: true, message: "Saved to \(slot.title)")
         } catch {
             log.error("could not write savestate: \(error.localizedDescription)")
+            return SaveOutcome(slot: slot, succeeded: false,
+                               message: "Could not write \(slot.title): \(error.localizedDescription)")
         }
     }
 
-    private func applyLoadState() {
-        guard let data = try? Data(contentsOf: rom.saveStateURL) else { return }
+    private func readState(from slot: SaveSlot) -> SaveOutcome {
+        guard let data = try? Data(contentsOf: rom.stateURL(for: slot)) else {
+            log.error("\(slot.title, privacy: .public) is empty")
+            return SaveOutcome(slot: slot, succeeded: false, message: "\(slot.title) is empty.")
+        }
+
         let loaded = data.withUnsafeBytes { raw -> Bool in
             guard let base = raw.baseAddress else { return false }
             return eb_retro_unserialize(base, data.count)
         }
-        if loaded {
-            log.info("resumed from savestate (\(data.count) bytes)")
-        } else {
-            log.error("core refused the savestate; starting fresh")
+
+        guard loaded else {
+            log.error("core refused the savestate")
+            return SaveOutcome(slot: slot, succeeded: false,
+                               message: "The core refused \(slot.title).")
         }
+        log.info("loaded \(slot.title, privacy: .public) (\(data.count) bytes)")
+        return SaveOutcome(slot: slot, succeeded: true, message: "Loaded \(slot.title)")
+    }
+
+    private func report(_ outcome: SaveOutcome) {
+        saveOutcomeStorage.withLock { $0 = outcome }
     }
 
     /// Writes battery-backed save RAM next to the ROM's savestate.

@@ -22,7 +22,9 @@ struct GameSettingsSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var showResetConfirmation = false
-    @State private var showLoadConfirmation = false
+    /// The slot a load has been requested for, waiting on confirmation. Loading is
+    /// the one savestate action that throws work away, so it is the one that asks.
+    @State private var pendingLoad: SaveSlot?
 
     var body: some View {
         NavigationStack {
@@ -47,8 +49,18 @@ struct GameSettingsSheet: View {
             } message: {
                 Text("This is the SNES reset button: any unsaved progress in the game is lost, but your SRAM saves are kept.")
             }
-            .confirmationDialog("Load the last savestate?", isPresented: $showLoadConfirmation) {
-                Button("Load state", role: .destructive) { runtime.session.loadState() }
+            .confirmationDialog("Load this savestate?",
+                                isPresented: Binding(get: { pendingLoad != nil },
+                                                     set: { if !$0 { pendingLoad = nil } }),
+                                titleVisibility: .visible) {
+                if let slot = pendingLoad {
+                    Button("Load \(slot.title)", role: .destructive) {
+                        runtime.loadState(from: slot)
+                        pendingLoad = nil
+                        dismiss()
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingLoad = nil }
             } message: {
                 Text("Progress since that state was saved will be lost.")
             }
@@ -58,30 +70,77 @@ struct GameSettingsSheet: View {
     // MARK: - State
 
     private var stateSection: some View {
-        Section {
-            Button {
-                runtime.session.saveState()
-            } label: {
-                Label("Save state", systemImage: "square.and.arrow.down")
+        Group {
+            Section {
+                Button {
+                    runtime.saveState(to: .manual(settings.quickSaveSlot))
+                } label: {
+                    Label("Save to \(SaveSlot.manual(settings.quickSaveSlot).title)",
+                          systemImage: "square.and.arrow.down")
+                }
+
+                Picker("Save button writes to", selection: $settings.quickSaveSlot) {
+                    ForEach(SaveSlot.manual) { slot in
+                        Text(slot.title).tag(slot.id)
+                    }
+                }
+            } header: {
+                Text("Savestates")
+            } footer: {
+                Text("A savestate is a snapshot of the console taken mid-frame, so it can be made anywhere — no need to find a phone to call Dad. The SAVE button in the game writes to the slot chosen above.")
             }
 
-            Button {
-                showLoadConfirmation = true
-            } label: {
-                Label(runtime.rom.hasSavedState ? "Load state" : "No state saved yet",
-                      systemImage: "square.and.arrow.up")
+            Section {
+                ForEach(runtime.saveSlots) { info in
+                    slotRow(info)
+                }
+            } header: {
+                Text("Slots")
+            } footer: {
+                Text("The automatic slot is rewritten whenever the app leaves the foreground, which is what a game resumes from. The numbered slots change only when you save to them. Battery saves are kept alongside them.")
             }
-            .disabled(!runtime.rom.hasSavedState)
 
-            Button(role: .destructive) {
-                showResetConfirmation = true
-            } label: {
-                Label("Reset console", systemImage: "arrow.counterclockwise")
+            Section {
+                Button(role: .destructive) {
+                    showResetConfirmation = true
+                } label: {
+                    Label("Reset console", systemImage: "arrow.counterclockwise")
+                }
             }
-        } header: {
-            Text("Game")
-        } footer: {
-            Text("Battery saves (the ones the game itself makes) are written automatically. A savestate is a snapshot you take, and it is what the game resumes from next time.")
+        }
+    }
+
+    /// One slot: what is in it, and the two things you can do about it. Deleting is a
+    /// swipe rather than a third button, because it is the rare one.
+    private func slotRow(_ info: SaveSlotInfo) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(info.slot.title)
+                Text(info.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Button("Save") {
+                runtime.saveState(to: info.slot)
+            }
+            .buttonStyle(.borderless)
+            if !info.isEmpty {
+                Button("Load") {
+                    pendingLoad = info.slot
+                }
+                .buttonStyle(.borderless)
+                .tint(.accentColor)
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            if !info.isEmpty {
+                Button(role: .destructive) {
+                    runtime.eraseState(in: info.slot)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
         }
     }
 

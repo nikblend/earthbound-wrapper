@@ -116,7 +116,7 @@ struct LibraryScreen: View {
                             Text(rom.name)
                                 .foregroundStyle(.primary)
                             HStack(spacing: 8) {
-                                if rom.hasSavedState {
+                                if rom.hasAnySavedState {
                                     Label("state", systemImage: "bookmark.fill")
                                 }
                                 if rom.hasSRAM {

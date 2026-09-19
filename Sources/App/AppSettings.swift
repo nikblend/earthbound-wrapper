@@ -46,6 +46,12 @@ final class AppSettings {
     /// Opacity of the on-screen controls, 0.3…1.
     var controlOpacity: Double { didSet { persist() } }
 
+    // MARK: - Savestates
+
+    /// The numbered slot the in-game Save button writes to. Stored as the slot's id
+    /// rather than as the slot itself, so it survives the slot list changing shape.
+    var quickSaveSlot: Int { didSet { persist() } }
+
     // MARK: - Core options
 
     /// Only the options the player has actually changed; anything absent falls
@@ -70,6 +76,7 @@ final class AppSettings {
         volume = stored["volume"] as? Double ?? 0.9
         stickDiagonals = stored["stickDiagonals"] as? Bool ?? true
         controlOpacity = stored["controlOpacity"] as? Double ?? 0.85
+        quickSaveSlot = stored["quickSaveSlot"] as? Int ?? 1
         coreOptionValues = stored["coreOptionValues"] as? [String: String] ?? [:]
     }
 
@@ -86,6 +93,7 @@ final class AppSettings {
             "volume": volume,
             "stickDiagonals": stickDiagonals,
             "controlOpacity": controlOpacity,
+            "quickSaveSlot": quickSaveSlot,
             "coreOptionValues": coreOptionValues,
         ] as [String: Any], forKey: Self.storageKey)
     }

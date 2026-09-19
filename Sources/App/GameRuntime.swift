@@ -34,6 +34,16 @@ final class GameRuntime {
     private(set) var failureMessage: String?
     private(set) var isFastForwarding = false
 
+    /// Every savestate slot for this ROM, refreshed whenever one changes. Held rather
+    /// than computed on demand because the settings screen reads it while the
+    /// emulation thread is writing the files underneath it.
+    private(set) var saveSlots: [SaveSlotInfo] = []
+
+    /// A one-line confirmation for something the player just did, cleared shortly
+    /// after it appears.
+    private(set) var toast: String?
+    private var toastClearer: Task<Void, Never>?
+
     /// The option values the running core was started with. Compared against the
     /// current settings to tell the player that a change needs a restart.
     private let installedCoreOptions: [String: String]
@@ -64,6 +74,7 @@ final class GameRuntime {
         controls = TouchControlsModel(gamepad: gamepad, size: size, safeArea: safeArea)
         controls.allowsDiagonals = settings.stickDiagonals
 
+        saveSlots = rom.saveStateSlots()
         applyControlFeedback()
     }
 
@@ -108,7 +119,10 @@ final class GameRuntime {
 
         if session.isRunning {
             session.flushSRAM()
-            session.saveState()
+            // Into the automatic slot: it is the one a game resumes from, and it is
+            // never something the player asked for, so it never competes with a slot
+            // they chose deliberately.
+            session.saveState(to: .auto)
             // Both commands are drained at a frame boundary, so give the emulation
             // thread a moment to act on them before asking it to exit.
             usleep(60_000)
@@ -135,8 +149,61 @@ final class GameRuntime {
             failureMessage = message
         }
         guard !didShutdown else { return }
+        if let outcome = session.takeSaveOutcome() {
+            // The write happened on the emulation thread a frame ago, so the file on
+            // disk has changed by the time this runs.
+            refreshSaveSlots()
+            showToast(outcome.message)
+        }
         retryAudioIfNeeded()
         conductor.apply(session.consumeTactileFrame())
+    }
+
+    // MARK: - Savestates
+
+    func saveState(to slot: SaveSlot) {
+        session.saveState(to: slot)
+        scheduleSaveSlotRefresh()
+    }
+
+    func loadState(from slot: SaveSlot) {
+        session.loadState(from: slot)
+        scheduleSaveSlotRefresh()
+    }
+
+    /// Deletes a slot's file. Unlike save and load this involves no core state, so it
+    /// happens immediately and needs no round trip through the frame loop.
+    func eraseState(in slot: SaveSlot) {
+        rom.eraseState(in: slot)
+        refreshSaveSlots()
+        showToast("Cleared \(slot.title)")
+    }
+
+    func refreshSaveSlots() {
+        saveSlots = rom.saveStateSlots()
+    }
+
+    /// Refreshes the slot list a moment after a save or load was requested.
+    ///
+    /// The draw loop refreshes it too, but that cannot be the only trigger: the
+    /// settings sheet covers the picture while the player uses it, and a view that is
+    /// covered is not one that is necessarily still drawing.
+    private func scheduleSaveSlotRefresh() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.refreshSaveSlots()
+        }
+    }
+
+    private func showToast(_ message: String) {
+        toast = message
+        toastClearer?.cancel()
+        toastClearer = Task { [weak self] in
+            // Explicitly `Task<Never, Never>`: the shorthand inference for this one
+            // has been known to need it, and a build round here costs a sideload.
+            try? await Task<Never, Never>.sleep(for: .seconds(1.8))
+            guard !Task.isCancelled else { return }
+            self?.toast = nil
+        }
     }
 
     /// Audio can only fail at first start (route in use, session activation race), so
