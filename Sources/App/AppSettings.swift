@@ -43,6 +43,9 @@ final class AppSettings {
 
     /// Produce diagonals. Off gives a strict four-way stick.
     var stickDiagonals: Bool { didSet { persist() } }
+    /// Whether pressing A also presses Start. On for EarthBound, where Start is needed
+    /// once and inert afterwards; off for ROMs where Start is the pause button.
+    var startFollowsA: Bool { didSet { persist() } }
     /// Opacity of the on-screen controls, 0.3…1.
     var controlOpacity: Double { didSet { persist() } }
     /// Scale of the on-screen controls, 0.8…1.4. No single size fits every hand, and a
@@ -79,6 +82,7 @@ final class AppSettings {
         audioReactiveHaptics = stored["audioReactiveHaptics"] as? Bool ?? true
         volume = stored["volume"] as? Double ?? 0.9
         stickDiagonals = stored["stickDiagonals"] as? Bool ?? true
+        startFollowsA = stored["startFollowsA"] as? Bool ?? true
         controlOpacity = stored["controlOpacity"] as? Double ?? 0.85
         controlScale = stored["controlScale"] as? Double ?? 1.0
         quickSaveSlot = stored["quickSaveSlot"] as? Int ?? 1
@@ -97,6 +101,7 @@ final class AppSettings {
             "audioReactiveHaptics": audioReactiveHaptics,
             "volume": volume,
             "stickDiagonals": stickDiagonals,
+            "startFollowsA": startFollowsA,
             "controlOpacity": controlOpacity,
             "controlScale": controlScale,
             "quickSaveSlot": quickSaveSlot,

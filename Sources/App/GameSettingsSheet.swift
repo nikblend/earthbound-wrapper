@@ -211,10 +211,11 @@ struct GameSettingsSheet: View {
                            range: 0.8...1.4,
                            readout: "\(Int(settings.controlScale * 100))%")
             Toggle("Allow diagonals", isOn: $settings.stickDiagonals)
+            Toggle("A also presses Start", isOn: $settings.startFollowsA)
         } header: {
             Text("Touch controls")
         } footer: {
-            Text("The stick snaps to eight directions, so holding it north-east presses Up and Right together — which is what the SNES does when you walk into a corner. Turning diagonals off restricts it to four.\n\nControl size scales the buttons and the stick together, and grows the cluster inward from the corner. There is no single size that suits every hand.")
+            Text("The stick snaps to eight directions, so holding it north-east presses Up and Right together — which is what the SNES does when you walk into a corner. Turning diagonals off restricts it to four.\n\nControl size scales the buttons and the stick together, and grows the cluster inward from the corner. There is no single size that suits every hand.\n\nThere is no Select or Start button. In EarthBound, Select is just a second B, and Start is needed once to leave the title screen and does nothing after that — so A carries it. Turn this off for a ROM that uses Start as its pause button.")
         }
     }
 

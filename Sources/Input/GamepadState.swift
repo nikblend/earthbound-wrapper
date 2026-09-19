@@ -29,6 +29,15 @@ final class GamepadState {
     /// Called when the stick snaps to a different direction (including release).
     var onStickDirectionChanged: ((StickDirection) -> Void)?
 
+    /// Whether holding A also presses Start.
+    ///
+    /// EarthBound uses Start exactly once -- to leave the title screen -- and never
+    /// again, which is why there is no button for it: A carries it instead. It cannot be
+    /// unconditional, because in other ROMs Start is the pause button and every A press
+    /// would pause the game. So it is a switch, and the player decides which kind of game
+    /// they are running.
+    var startFollowsA = true
+
     private let input: OpaquePointer
 
     init(input: OpaquePointer) {
@@ -84,6 +93,9 @@ final class GamepadState {
         var mask: UInt32 = 0
         for button in heldButtons { mask |= button.bit }
         mask |= UInt32.joypadMask(from: stickDirection)
+        // Deliberately only a mask bit: Start has no on-screen button, so it never enters
+        // `heldButtons` and therefore never lights anything up.
+        if startFollowsA, heldButtons.contains(.a) { mask |= JoypadButton.start.bit }
         eb_input_set_mask(input, 0, mask)
     }
 }

@@ -55,7 +55,6 @@ struct ControlLayout {
 
     let faceButtons: [ButtonSlot]
     let shoulders: [ButtonSlot]
-    let systemButtons: [ButtonSlot]
 
     init(size: CGSize, safeArea: EdgeInsets, scale: CGFloat = 1) {
         self.size = size
@@ -113,50 +112,43 @@ struct ControlLayout {
         ]
 
         // --- Shoulders ----------------------------------------------------
-        // Directly above the face cluster, where the thumb that presses them already is.
+        // Stacked vertically in the margin to the right of the picture, directly above
+        // the face cluster.
         //
-        // The note here always claimed they were stacked above the cluster, while the
-        // code parked them at the top of the screen -- a long way from any thumb, and
-        // the reason reaching L was awkward. They are now where the note said.
+        // That column is the one strip of screen with nothing else in it: an
+        // aspect-correct picture is letterboxed on exactly those two sides, and the face
+        // cluster occupies the bottom of the right-hand one. Stacked here, L and R cover
+        // no game pixels at all, and the thumb reaches them by moving up the column it is
+        // already resting in rather than crossing the lettered bubble.
         //
-        // Wider than tall on purpose: L and R are pressed with the side of a thumb,
-        // which wants a longer target than a face button does. L sits inboard of R, so
-        // it is reached by sliding the thumb up and left.
-        let shoulderSize = CGSize(width: buttonRadius * 2.9, height: buttonRadius * 1.25)
-        let shoulderY = clusterCenter.y - clusterExtent - buttonRadius * 1.25
-        shoulders = [
-            ButtonSlot(button: .r,
-                       center: CGPoint(x: size.width - safeArea.trailing - trailingMargin
-                                          - shoulderSize.width * 0.5,
-                                       y: shoulderY),
-                       radius: shoulderSize.width * 0.5),
-            ButtonSlot(button: .l,
-                       center: CGPoint(x: size.width - safeArea.trailing - trailingMargin
-                                          - shoulderSize.width * 1.6,
-                                       y: shoulderY),
-                       radius: shoulderSize.width * 0.5),
-        ]
+        // L is the lower of the two because it is the one that earns its place -- in
+        // EarthBound it is a second A -- and the lower position is the shorter reach. R
+        // rings a bicycle bell.
+        let shoulderRadius = buttonRadius * 1.3
+        // What `drawPill` actually draws, which is taller than `shoulderRadius * 1.15`
+        // only by accident of the same formula being used for width.
+        let pillHeight = shoulderRadius * 1.15
+        let clusterTop = clusterCenter.y - clusterExtent
+        let topLimit = safeArea.top + pillHeight * 0.5 + 6
 
-        // --- Start / Select ------------------------------------------------
-        // Along the top edge, and deliberately small.
-        //
-        // In EarthBound these are the two buttons that do least: Select is a second B,
-        // and Start exists to get past the title screen. So they take the stretch of
-        // screen furthest from both thumbs and nothing more is asked of them. They are
-        // still here because that single Start press is required.
-        let systemRadius = buttonRadius * 1.0
-        let systemY = safeArea.top + systemRadius * 1.5 + 5
-        systemButtons = [
-            ButtonSlot(button: .select,
-                       center: CGPoint(x: size.width * 0.5 - systemRadius * 1.25, y: systemY),
-                       radius: systemRadius),
-            ButtonSlot(button: .start,
-                       center: CGPoint(x: size.width * 0.5 + systemRadius * 1.25, y: systemY),
-                       radius: systemRadius),
+        let lowerY = clusterTop - shoulderRadius * 0.4 - pillHeight * 0.5
+        // The gap closes before either pill is allowed off the top of the screen, so a
+        // large Control size tightens the stack instead of losing R off the edge.
+        let room = max(lowerY - pillHeight - topLimit, 0)
+        let gap = min(pillHeight * 0.35, room)
+        let upperY = lowerY - pillHeight - gap
+
+        shoulders = [
+            ButtonSlot(button: .l,
+                       center: CGPoint(x: clusterCenter.x, y: lowerY),
+                       radius: shoulderRadius),
+            ButtonSlot(button: .r,
+                       center: CGPoint(x: clusterCenter.x, y: upperY),
+                       radius: shoulderRadius),
         ]
     }
 
-    var allButtonSlots: [ButtonSlot] { faceButtons + shoulders + systemButtons }
+    var allButtonSlots: [ButtonSlot] { faceButtons + shoulders }
 
     /// Extra radius beyond a button that still counts as a hold, so a slightly
     /// sloppy thumb does not drop the press.
@@ -467,7 +459,6 @@ struct TouchControlsOverlay: View {
         drawStick(in: &context)
         for slot in model.layout.shoulders { drawPill(slot, in: &context, isHeld: gamepad.isHeld(slot.button)) }
         drawFaceCluster(in: &context)
-        for slot in model.layout.systemButtons { drawPill(slot, in: &context, isHeld: gamepad.isHeld(slot.button)) }
     }
 
     /// The four face buttons as one cluster.
@@ -589,17 +580,9 @@ struct TouchControlsOverlay: View {
         let shape = Path(roundedRect: rect, cornerRadius: height / 2)
         context.fill(shape, with: .color(.white.opacity(isHeld ? 0.55 : 0.13)))
         context.stroke(shape, with: .color(.white.opacity(isHeld ? 0.95 : 0.26)), lineWidth: 1.5)
-        // Spelled out. "SEL" and "ST" saved width but were readable only to someone who
-        // already knew what they stood for, which is the opposite of what a label is for.
-        let isWorded = slot.button == .select || slot.button == .start
-        let label = slot.button == .select ? "SELECT"
-            : (slot.button == .start ? "START" : slot.button.label)
-        // Four to six glyphs where the letters are one, so the words need a smaller size
-        // to stay inside the same pill.
         context.draw(
-            Text(label)
-                .font(.system(size: height * (isWorded ? 0.36 : 0.44), weight: .semibold,
-                              design: .rounded))
+            Text(slot.button.label)
+                .font(.system(size: height * 0.44, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(isHeld ? 1 : 0.68)),
             at: slot.center)
     }

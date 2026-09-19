@@ -70,6 +70,7 @@ final class GameRuntime {
         self.session = session
 
         let gamepad = GamepadState(input: session.input)
+        gamepad.startFollowsA = settings.startFollowsA
         self.gamepad = gamepad
         controls = TouchControlsModel(gamepad: gamepad, size: size, safeArea: safeArea,
                                       scale: CGFloat(settings.controlScale))
@@ -227,6 +228,7 @@ final class GameRuntime {
         conductor.update(settings: newSettings.hapticSettings)
         controls.allowsDiagonals = newSettings.stickDiagonals
         controls.scale = CGFloat(newSettings.controlScale)
+        gamepad.startFollowsA = newSettings.startFollowsA
         applyControlFeedback()
     }
 
