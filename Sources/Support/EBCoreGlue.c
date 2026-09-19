@@ -62,6 +62,9 @@ EB_CHECK_SIGNATURE(bool, retro_load_game, (const struct retro_game_info *));
 EB_CHECK_SIGNATURE(void, retro_set_controller_port_device, (unsigned, unsigned));
 EB_CHECK_SIGNATURE(void *, retro_get_memory_data, (unsigned));
 EB_CHECK_SIGNATURE(size_t, retro_get_memory_size, (unsigned));
+EB_CHECK_SIGNATURE(size_t, retro_serialize_size, (void));
+EB_CHECK_SIGNATURE(bool, retro_serialize, (void *, size_t));
+EB_CHECK_SIGNATURE(bool, retro_unserialize, (const void *, size_t));
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -179,6 +182,16 @@ bool eb_retro_load_game(void *gameInfo) {
 void eb_retro_unload_game(void) { retro_unload_game(); }
 void eb_retro_run(void) { retro_run(); }
 void eb_retro_reset(void) { retro_reset(); }
+
+size_t eb_retro_serialize_size(void) { return retro_serialize_size(); }
+
+bool eb_retro_serialize(void *data, size_t size) {
+    return retro_serialize(data, size);
+}
+
+bool eb_retro_unserialize(const void *data, size_t size) {
+    return retro_unserialize(data, size);
+}
 
 void eb_retro_set_controller_port_device(unsigned port, unsigned device) {
     retro_set_controller_port_device(port, device);

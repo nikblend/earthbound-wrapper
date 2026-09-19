@@ -103,7 +103,7 @@ final class HapticConductor {
     }
 
     func stop() {
-        rumblePlayer?.stop(atTime: CHHapticTimeImmediate)
+        try? rumblePlayer?.stop(atTime: CHHapticTimeImmediate)
         rumblePlayer = nil
         isRumbleActive = false
         engine?.stop()
@@ -220,9 +220,10 @@ final class HapticConductor {
         if intensity <= Self.silenceThreshold {
             silenceRun += 1
             if isRumbleActive && silenceRun > Self.silenceBatchesBeforeParking {
-                // Park it. `pause` keeps the pattern's position and costs far
-                // less than a running player at zero intensity.
-                try? rumblePlayer?.pause()
+                // Park it. Leaving a player running at zero intensity still
+                // costs, and the restart path below sets its own intensity, so
+                // nothing is lost by not preserving the pattern's position.
+                try? rumblePlayer?.stop(atTime: CHHapticTimeImmediate)
                 isRumbleActive = false
                 lastRumbleIntensity = -1
             }

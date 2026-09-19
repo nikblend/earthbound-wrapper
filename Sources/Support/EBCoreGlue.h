@@ -52,6 +52,14 @@ void eb_retro_run(void);
 void eb_retro_reset(void);
 void eb_retro_set_controller_port_device(unsigned port, unsigned device);
 
+/// Save states. The size is queried fresh each time rather than cached, because
+/// a core is free to report a different size once content is loaded.
+/// `serialize` writes the core's state into a caller-owned buffer; `unserialize`
+/// reads it back. Both return false if the core refuses the state.
+size_t eb_retro_serialize_size(void);
+bool eb_retro_serialize(void *data, size_t size);
+bool eb_retro_unserialize(const void *data, size_t size);
+
 /// The `RETRO_MEMORY_*` id is passed straight through.
 void *eb_retro_get_memory_data(unsigned id);
 size_t eb_retro_get_memory_size(unsigned id);

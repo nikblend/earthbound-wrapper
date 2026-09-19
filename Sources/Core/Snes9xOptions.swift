@@ -173,7 +173,8 @@ enum CoreOptionCatalog {
     struct Group: Identifiable, Sendable {
         let id: String
         let title: String
-        let caption: String
+        /// Absent for groups that need no explanation.
+        let caption: String?
         let keys: [String]
     }
 

@@ -333,8 +333,19 @@ final class RetroEnvironment: @unchecked Sendable {
             cache[string] = duplicated
             return duplicated
         }
-        return UnsafePointer(cached)
+        // `strdup` fails only under memory exhaustion, but the return type is
+        // deliberately non-optional: snes9x strcmp's the value it gets back from
+        // GET_VARIABLE without checking it, so this must never hand the core a
+        // null pointer. An empty string is a poor answer, but a safe one.
+        return cached.map { UnsafePointer($0) } ?? Self.emptyCString
     }
+
+    /// Allocated once and never freed: the last-resort answer from `cString`.
+    private static let emptyCString: UnsafePointer<CChar> = {
+        let buffer = UnsafeMutablePointer<CChar>.allocate(capacity: 1)
+        buffer.pointee = 0
+        return UnsafePointer(buffer)
+    }()
 
     /// Logs each unhandled command once, so a new core revision asking for
     /// something we do not implement shows up in the log without flooding it

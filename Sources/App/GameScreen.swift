@@ -85,6 +85,7 @@ struct GameScreen: View {
             if let runtime {
                 GameSettingsSheet(runtime: runtime,
                                   settings: settings,
+                                  display: runtime.display,
                                   onRestart: { restart() },
                                   onQuit: {
                                       showSettings = false
