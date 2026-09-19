@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: A specific game is broken
+    url: https://github.com/libretro/snes9x/issues
+    about: The emulation is snes9x, not this app. Check the behaviour there first.
+
+  - name: How do I get a ROM in / how do I change the scaling
+    url: https://github.com/nikblend/earthbound-wrapper#readme
+    about: The README covers importing, installing, and every tuning knob.

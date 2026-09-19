@@ -1,0 +1,53 @@
+name: Build or install problem
+description: The build failed, the IPA will not install, or the app refuses to launch.
+title: "[Setup] "
+labels: ["setup"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most install failures are signing, not code. A free Apple ID gives a
+        seven-day signature, so an app that stops launching after a week needs
+        re-sideloading or AltStore's automatic refresh.
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where does it fail
+      options:
+        - `make ipa` / the GitHub Actions build
+        - Installing the .ipa
+        - The app launches but shows an error
+        - The app launches and then immediately quits
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: The output
+      description: Paste the failing command and its output, or the install error verbatim.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: toolchain
+    attributes:
+      label: Toolchain
+      description: Output of `xcodebuild -version`, plus your macOS version.
+      placeholder: Xcode 16.2, macOS 15.2
+    validations:
+      required: false
+
+  - type: dropdown
+    id: ci
+    attributes:
+      label: Does the GitHub Actions build succeed
+      options:
+        - "Yes — the failure is local"
+        - "No — CI fails too"
+        - Have not tried CI
+    validations:
+      required: false

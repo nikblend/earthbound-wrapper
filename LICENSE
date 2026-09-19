@@ -1,0 +1,49 @@
+MIT License
+
+Copyright (c) 2026 nikblend
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+Third-party components
+================================================================================
+
+This license covers the frontend in this repository. It does not, and cannot,
+relicense anything it depends on.
+
+1. libretro API header — ThirdParty/libretro/include/libretro.h
+   Copyright (C) 2010-2024 The RetroArch team.
+   MIT licensed, reproduced verbatim. This is the only third-party code
+   committed to this repository.
+
+2. snes9x libretro core — NOT in this repository
+   snes9x is fetched from https://github.com/libretro/snes9x at the revision in
+   ThirdParty/libretro/CORE_REVISION and compiled during the build by
+   scripts/build-core.sh. It is deliberately not vendored, so that this
+   repository contains no copy of it.
+
+   snes9x is distributed under its own license, which permits
+   non-commercial use only. A binary built from this repository
+   statically links snes9x and is therefore subject to that license, not to
+   the MIT license above — including its non-commercial restriction. See the
+   upstream repository for the exact terms.
+
+3. Super Nintendo and EarthBound are trademarks of Nintendo. This project is
+   unaffiliated with Nintendo, and ships neither their code nor their content.
+   No ROMs are included; you supply your own.

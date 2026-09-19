@@ -1,0 +1,91 @@
+name: Bug report
+description: Something does not work, or the game misbehaves.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two things to check before filing:
+
+        - **A specific game is broken but others are fine.** That is usually the
+          emulator core, not this app. Try the same game in RetroArch with the
+          snes9x core; if it fails there too, it belongs upstream at
+          https://github.com/libretro/snes9x.
+        - **Haptics do nothing.** Only devices with a Taptic Engine can rumble, and
+          the simulator never can. Check `Feel the current settings` in Settings
+          before filing.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. Import a ROM
+        2. Set Scaling to Fill
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: core-revision
+    attributes:
+      label: Core revision
+      description: |
+        The contents of `ThirdParty/libretro/CORE_REVISION`. Printed in the CI
+        step summary for a downloaded build.
+      placeholder: fae2fea08f74180759ef540ee94259213f503480
+    validations:
+      required: false
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it
+      options:
+        - Sideloadly
+        - AltStore
+        - Xcode, onto a device
+        - iOS Simulator
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device and iOS version
+      placeholder: iPhone 15 Pro, iOS 18.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: haptics
+    attributes:
+      label: Does the device support haptics
+      description: Shown by `Feel the current settings` in Settings.
+      options:
+        - "Yes — the audition rumbles"
+        - "No — the audition does nothing"
+        - Not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        If the app crashed or the core refused a ROM, the console output helps a
+        lot. Attach it from the Xcode console, or from
+        `log collect --last 5m` on a device built with Xcode.
+      render: text
+    validations:
+      required: false

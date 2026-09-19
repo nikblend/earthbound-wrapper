@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  # Only GitHub Actions are tracked here, and that is deliberate.
+  #
+  # The emulator core is pinned to a commit SHA in
+  # ThirdParty/libretro/CORE_REVISION rather than to a release, because snes9x
+  # publishes no recent tags and the frontend's constants are asserted against one
+  # exact revision. An automated bump would be a change to the emulation itself,
+  # which is not a dependency update — it is a decision, and it belongs to a human
+  # with a device to test on. See CONTRIBUTING.md for the re-pin procedure.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies

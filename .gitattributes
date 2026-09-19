@@ -1,0 +1,20 @@
+# Normalise everything to LF, including on a Windows checkout. The build only runs
+# on macOS, but a shell script committed with CRLF fails there with a baffling
+# "bad interpreter" error, so this is worth being explicit about.
+* text=auto eol=lf
+
+# Binary, and only present if someone regenerated the icon locally.
+*.png binary
+
+# The vendored API header is byte-compared against the pinned upstream revision by
+# scripts/verify-core-pin.sh. Any normalisation on checkout would break that check
+# for no reason.
+ThirdParty/libretro/include/libretro.h -text
+
+# Generated or fetched, never diffed, never merged.
+Support/Info.plist -diff
+ThirdParty/libretro/CORE_REVISION -diff
+
+# Keep the Xcode project out of GitHub's language stats; the repo is Swift.
+*.xcodeproj linguist-generated=true
+*.pbxproj linguist-generated=true
