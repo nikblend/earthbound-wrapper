@@ -130,12 +130,12 @@ final class HapticConductor {
 
     /// Stops and forgets the engine.
     ///
-    /// The handlers are cleared *before* stopping, because `stoppedHandler` fires for a
-    /// stop this file asked for just as much as for one the system imposed. The recovery
-    /// path must not resurrect an engine on the way out.
+    /// The handlers cannot be uninstalled -- `stoppedHandler` and `resetHandler` are
+    /// non-optional stored properties -- so a stop this file causes looks exactly like
+    /// one the system caused. Both handlers therefore check that they are still talking
+    /// about the current engine before acting, which is what stops an intentional
+    /// shutdown from resurrecting what it just closed.
     private func discardEngine() {
-        engine?.stoppedHandler = nil
-        engine?.resetHandler = nil
         engine?.stop()
         engine = nil
         rumblePlayer = nil
@@ -164,14 +164,19 @@ final class HapticConductor {
             // services reset. Both are recoverable, and a game that silently
             // loses its haptics for the rest of the session is worse than one
             // that spends a few milliseconds restarting.
-            engine.stoppedHandler = { [weak self] reason in
+            // Both closures capture the engine weakly: it owns the closure, so a strong
+            // capture would be a cycle, and the reference is only needed to identify
+            // which engine is talking.
+            engine.stoppedHandler = { [weak self, weak engine] reason in
+                guard let engine else { return }
                 Task { @MainActor in
-                    self?.handleStopped(reason)
+                    self?.handleStopped(reason, from: engine)
                 }
             }
-            engine.resetHandler = { [weak self] in
+            engine.resetHandler = { [weak self, weak engine] in
+                guard let engine else { return }
                 Task { @MainActor in
-                    self?.rebuildAfterReset()
+                    self?.handleReset(from: engine)
                 }
             }
             return engine
@@ -189,7 +194,10 @@ final class HapticConductor {
     /// attempt is made to distinguish backgrounding from the rest: a restart while
     /// suspended simply fails, is throttled, and is retried by `apply` on the next
     /// frame after the app is back.
-    private func handleStopped(_ reason: CHHapticEngine.StoppedReason) {
+    private func handleStopped(_ reason: CHHapticEngine.StoppedReason, from engine: CHHapticEngine) {
+        // Not our engine any more means this stop was caused by `discardEngine` or by a
+        // rebuild, and reviving it would be undoing what the caller just asked for.
+        guard engine === self.engine else { return }
         isEngineRunning = false
         lastStopDescription = String(describing: reason)
         log.info("haptic engine stopped (\(String(describing: reason), privacy: .public))")
@@ -223,8 +231,8 @@ final class HapticConductor {
     /// The media services daemon restarted, which invalidates the engine and every
     /// player made from it. Apple's guidance is to build a new engine rather than reuse
     /// the old one.
-    private func rebuildAfterReset() {
-        guard settings.isEnabled else { return }
+    private func handleReset(from engine: CHHapticEngine) {
+        guard engine === self.engine, settings.isEnabled else { return }
         log.info("haptic engine reset; rebuilding")
         discardEngine()
         lastRestartAttempt = 0
