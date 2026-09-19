@@ -25,6 +25,8 @@ struct GameSettingsSheet: View {
     /// The slot a load has been requested for, waiting on confirmation. Loading is
     /// the one savestate action that throws work away, so it is the one that asks.
     @State private var pendingLoad: SaveSlot?
+    /// The haptic engine's self-report, refreshed while this screen is open.
+    @State private var engineStatus = "—"
 
     var body: some View {
         NavigationStack {
@@ -37,6 +39,7 @@ struct GameSettingsSheet: View {
                 coreOptionsSections
                 librarySection
             }
+            .task { await pollEngineStatus() }
             .navigationTitle(runtime.rom.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -203,11 +206,28 @@ struct GameSettingsSheet: View {
                            value: $settings.controlOpacity,
                            range: 0.3...1,
                            readout: "\(Int(settings.controlOpacity * 100))%")
+            LabelledSlider(title: "Control size",
+                           value: $settings.controlScale,
+                           range: 0.8...1.4,
+                           readout: "\(Int(settings.controlScale * 100))%")
             Toggle("Allow diagonals", isOn: $settings.stickDiagonals)
         } header: {
             Text("Touch controls")
         } footer: {
-            Text("The stick snaps to eight directions, so holding it north-east presses Up and Right together — which is what the SNES does when you walk into a corner. Turning diagonals off restricts it to four.")
+            Text("The stick snaps to eight directions, so holding it north-east presses Up and Right together — which is what the SNES does when you walk into a corner. Turning diagonals off restricts it to four.\n\nControl size scales the buttons and the stick together, and grows the cluster inward from the corner. There is no single size that suits every hand.")
+        }
+    }
+
+    /// Reads the haptic engine's state once a second while this screen is up.
+    ///
+    /// Haptics that stop are hard to describe from memory and impossible to tell apart
+    /// from the outside: the system stopping the engine and this app stopping it feel
+    /// exactly the same. Watching this line while it happens is the difference between a
+    /// bug report and a guess.
+    private func pollEngineStatus() async {
+        while !Task.isCancelled {
+            engineStatus = runtime.conductor.diagnostics
+            try? await Task<Never, Never>.sleep(for: .seconds(1))
         }
     }
 
@@ -240,6 +260,14 @@ struct GameSettingsSheet: View {
                 Label("Feel the current settings", systemImage: "hand.tap")
             }
             .disabled(!settings.hapticsEnabled)
+
+            HStack {
+                Text("Engine")
+                Spacer()
+                Text(engineStatus)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
 
             if settings.hapticsEnabled {
                 LabelledSlider(title: "Intensity",

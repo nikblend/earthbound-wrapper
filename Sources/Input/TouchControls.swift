@@ -57,11 +57,16 @@ struct ControlLayout {
     let shoulders: [ButtonSlot]
     let systemButtons: [ButtonSlot]
 
-    init(size: CGSize, safeArea: EdgeInsets) {
+    init(size: CGSize, safeArea: EdgeInsets, scale: CGFloat = 1) {
         self.size = size
 
+        // One number from the player scales the whole control surface. No default fits
+        // every hand, and a thumb that cannot cover two adjacent buttons is a worse
+        // problem than a picture that is slightly smaller.
+        let scale = min(max(scale, 0.8), 1.4)
+
         // --- Stick -------------------------------------------------------
-        let wellRadius = min(max(size.height * 0.19, 54), 84)
+        let wellRadius = min(max(size.height * 0.19, 54), 84) * scale
         stickWellRadius = wellRadius
         stickNubRadius = wellRadius * 0.44
         // 30% of the well. Large enough that resting a thumb does not walk you
@@ -79,13 +84,20 @@ struct ControlLayout {
         // diamond's half-extent is `radius + spread`, and both margins are small: the
         // cluster belongs in the corner, over the part of a 2D RPG's picture that
         // nothing important ever occupies.
-        let buttonRadius = min(max(size.height * 0.0687, 26), 38)
-        // 1.55 rather than 2. Four circles that merely touched would make the cluster
-        // half again as wide, and width is the dimension that covers the game.
-        let spread = buttonRadius * 1.55
+        // The margins are measured from the base size rather than the scaled one, so
+        // that scaling the buttons up grows the cluster inward instead of pushing it off
+        // the screen.
+        let baseRadius = min(max(size.height * 0.0745, 27), 40)
+        let buttonRadius = baseRadius * scale
+        // 1.65 rather than 2. Four circles that merely touched would make the cluster
+        // half again as wide, and width is the dimension that covers the game. Not
+        // tighter than this either: the circles overlap by about a sixth of a button,
+        // which is as much as they can overlap before one press starts landing on its
+        // neighbour.
+        let spread = buttonRadius * 1.65
         let clusterExtent = buttonRadius + spread
-        let trailingMargin = max(buttonRadius * 0.5, 14)
-        let bottomMargin = max(buttonRadius * 0.6, 16)
+        let trailingMargin = max(baseRadius * 0.5, 14)
+        let bottomMargin = max(baseRadius * 0.6, 16)
         let clusterCenter = CGPoint(
             x: size.width - safeArea.trailing - trailingMargin - clusterExtent,
             y: size.height - safeArea.bottom - bottomMargin - clusterExtent)
@@ -101,30 +113,39 @@ struct ControlLayout {
         ]
 
         // --- Shoulders ----------------------------------------------------
-        // Stacked above the face cluster rather than at the top corners of the
-        // screen. On a phone held in landscape the top corners are a stretch away
-        // from the thumb, which is exactly where L and R must not be.
-        // Scaled from the button radius so the two stay in proportion, but a little
-        // wider: L and R are pressed with the side of a thumb, which wants a longer
-        // target than a face button does.
-        let shoulderSize = CGSize(width: buttonRadius * 3.0, height: buttonRadius * 1.3)
-        let shoulderY = safeArea.top + shoulderSize.height * 0.5 + 6
+        // Directly above the face cluster, where the thumb that presses them already is.
+        //
+        // The note here always claimed they were stacked above the cluster, while the
+        // code parked them at the top of the screen -- a long way from any thumb, and
+        // the reason reaching L was awkward. They are now where the note said.
+        //
+        // Wider than tall on purpose: L and R are pressed with the side of a thumb,
+        // which wants a longer target than a face button does. L sits inboard of R, so
+        // it is reached by sliding the thumb up and left.
+        let shoulderSize = CGSize(width: buttonRadius * 2.9, height: buttonRadius * 1.25)
+        let shoulderY = clusterCenter.y - clusterExtent - buttonRadius * 1.25
         shoulders = [
             ButtonSlot(button: .r,
-                       center: CGPoint(x: size.width - safeArea.trailing - shoulderSize.width * 0.5,
+                       center: CGPoint(x: size.width - safeArea.trailing - trailingMargin
+                                          - shoulderSize.width * 0.5,
                                        y: shoulderY),
                        radius: shoulderSize.width * 0.5),
             ButtonSlot(button: .l,
-                       center: CGPoint(x: size.width - safeArea.trailing - shoulderSize.width * 1.7,
+                       center: CGPoint(x: size.width - safeArea.trailing - trailingMargin
+                                          - shoulderSize.width * 1.6,
                                        y: shoulderY),
                        radius: shoulderSize.width * 0.5),
         ]
 
         // --- Start / Select ------------------------------------------------
-        // Centre of the top edge: out from under both thumbs, but still a short
-        // move from the right one, which is where a hand goes for a menu.
-        let systemRadius = buttonRadius * 0.82
-        let systemY = safeArea.top + systemRadius + 6
+        // Along the top edge, and deliberately small.
+        //
+        // In EarthBound these are the two buttons that do least: Select is a second B,
+        // and Start exists to get past the title screen. So they take the stretch of
+        // screen furthest from both thumbs and nothing more is asked of them. They are
+        // still here because that single Start press is required.
+        let systemRadius = buttonRadius * 1.0
+        let systemY = safeArea.top + systemRadius * 1.5 + 5
         systemButtons = [
             ButtonSlot(button: .select,
                        center: CGPoint(x: size.width * 0.5 - systemRadius * 1.25, y: systemY),
@@ -188,14 +209,36 @@ final class TouchControlsModel {
     /// stick, which some players prefer for tile-based movement.
     var allowsDiagonals = true
 
-    init(gamepad: GamepadState, size: CGSize, safeArea: EdgeInsets) {
+    /// Scales the whole control surface. Setting it rebuilds the layout, so the slider
+    /// in Settings is live rather than a change that waits for a restart.
+    var scale: CGFloat = 1 {
+        didSet { rebuildLayout() }
+    }
+
+    private var lastSize: CGSize = .zero
+    private var lastSafeArea = EdgeInsets()
+
+    init(gamepad: GamepadState, size: CGSize, safeArea: EdgeInsets, scale: CGFloat = 1) {
         self.gamepad = gamepad
-        layout = ControlLayout(size: size, safeArea: safeArea)
+        lastSize = size
+        lastSafeArea = safeArea
+        // `layout` before `scale`: assigning to a property with an observer during
+        // initialization does not call it today, but ordering it this way means the
+        // layout exists either way.
+        layout = ControlLayout(size: size, safeArea: safeArea, scale: scale)
+        self.scale = scale
     }
 
     func updateLayout(size: CGSize, safeArea: EdgeInsets) {
-        guard size != layout.size else { return }
-        layout = ControlLayout(size: size, safeArea: safeArea)
+        guard size != lastSize || safeArea != lastSafeArea else { return }
+        lastSize = size
+        lastSafeArea = safeArea
+        rebuildLayout()
+    }
+
+    private func rebuildLayout() {
+        guard lastSize != .zero else { return }
+        layout = ControlLayout(size: lastSize, safeArea: lastSafeArea, scale: scale)
     }
 
     // MARK: - Touch routing
@@ -546,12 +589,17 @@ struct TouchControlsOverlay: View {
         let shape = Path(roundedRect: rect, cornerRadius: height / 2)
         context.fill(shape, with: .color(.white.opacity(isHeld ? 0.55 : 0.13)))
         context.stroke(shape, with: .color(.white.opacity(isHeld ? 0.95 : 0.26)), lineWidth: 1.5)
-        // "Select" and "Start" are long for this pill; abbreviate to keep the glyph
-        // size legible.
-        let label = slot.button == .select ? "SEL" : (slot.button == .start ? "ST" : slot.button.label)
+        // Spelled out. "SEL" and "ST" saved width but were readable only to someone who
+        // already knew what they stood for, which is the opposite of what a label is for.
+        let isWorded = slot.button == .select || slot.button == .start
+        let label = slot.button == .select ? "SELECT"
+            : (slot.button == .start ? "START" : slot.button.label)
+        // Four to six glyphs where the letters are one, so the words need a smaller size
+        // to stay inside the same pill.
         context.draw(
             Text(label)
-                .font(.system(size: height * 0.44, weight: .semibold, design: .rounded))
+                .font(.system(size: height * (isWorded ? 0.36 : 0.44), weight: .semibold,
+                              design: .rounded))
                 .foregroundStyle(.white.opacity(isHeld ? 1 : 0.68)),
             at: slot.center)
     }

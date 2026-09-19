@@ -45,6 +45,10 @@ final class AppSettings {
     var stickDiagonals: Bool { didSet { persist() } }
     /// Opacity of the on-screen controls, 0.3…1.
     var controlOpacity: Double { didSet { persist() } }
+    /// Scale of the on-screen controls, 0.8…1.4. No single size fits every hand, and a
+    /// thumb that cannot cover two adjacent buttons is worse than a slightly smaller
+    /// picture.
+    var controlScale: Double { didSet { persist() } }
 
     // MARK: - Savestates
 
@@ -76,6 +80,7 @@ final class AppSettings {
         volume = stored["volume"] as? Double ?? 0.9
         stickDiagonals = stored["stickDiagonals"] as? Bool ?? true
         controlOpacity = stored["controlOpacity"] as? Double ?? 0.85
+        controlScale = stored["controlScale"] as? Double ?? 1.0
         quickSaveSlot = stored["quickSaveSlot"] as? Int ?? 1
         coreOptionValues = stored["coreOptionValues"] as? [String: String] ?? [:]
     }
@@ -93,6 +98,7 @@ final class AppSettings {
             "volume": volume,
             "stickDiagonals": stickDiagonals,
             "controlOpacity": controlOpacity,
+            "controlScale": controlScale,
             "quickSaveSlot": quickSaveSlot,
             "coreOptionValues": coreOptionValues,
         ] as [String: Any], forKey: Self.storageKey)

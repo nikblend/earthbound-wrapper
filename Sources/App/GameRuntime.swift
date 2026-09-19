@@ -71,7 +71,8 @@ final class GameRuntime {
 
         let gamepad = GamepadState(input: session.input)
         self.gamepad = gamepad
-        controls = TouchControlsModel(gamepad: gamepad, size: size, safeArea: safeArea)
+        controls = TouchControlsModel(gamepad: gamepad, size: size, safeArea: safeArea,
+                                      scale: CGFloat(settings.controlScale))
         controls.allowsDiagonals = settings.stickDiagonals
 
         saveSlots = rom.saveStateSlots()
@@ -225,6 +226,7 @@ final class GameRuntime {
         audio?.volume = Float(newSettings.volume)
         conductor.update(settings: newSettings.hapticSettings)
         controls.allowsDiagonals = newSettings.stickDiagonals
+        controls.scale = CGFloat(newSettings.controlScale)
         applyControlFeedback()
     }
 

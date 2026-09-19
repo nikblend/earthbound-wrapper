@@ -62,6 +62,20 @@ final class HapticConductor {
     private var isEngineRunning = false
     private var supportsHaptics = false
 
+    /// Diagnostics, for the player rather than for the game.
+    ///
+    /// Haptics that stop are the hardest thing in this app to describe from memory,
+    /// because the two possible authors -- the system and this file -- feel identical
+    /// from the outside. These are shown in Settings so the question can be answered by
+    /// looking instead of by guessing.
+    private(set) var restartCount = 0
+    private(set) var lastStopDescription: String?
+
+    /// Throttles restart attempts. `apply` runs at frame rate, and a restart that
+    /// cannot succeed would otherwise be attempted sixty times a second.
+    private var lastRestartAttempt: TimeInterval = 0
+    private static let restartCooldown: TimeInterval = 2
+
     /// Looping continuous player carrying the rumble. Modulated in place.
     private var rumblePlayer: CHHapticAdvancedPatternPlayer?
     private var isRumbleActive = false
@@ -90,6 +104,13 @@ final class HapticConductor {
             log.info("haptics unavailable on this hardware")
             return
         }
+        // Idempotent on purpose. This is called on every return to the foreground, and
+        // building a second engine each time used to leave the previous one to be
+        // released mid-loop while a player still referenced it.
+        guard engine == nil else {
+            if !isEngineRunning { restartEngine() }
+            return
+        }
         guard let engine = makeEngine() else { return }
         self.engine = engine
         do {
@@ -104,11 +125,24 @@ final class HapticConductor {
 
     func stop() {
         try? rumblePlayer?.stop(atTime: CHHapticTimeImmediate)
-        rumblePlayer = nil
-        isRumbleActive = false
+        discardEngine()
+    }
+
+    /// Stops and forgets the engine.
+    ///
+    /// The handlers are cleared *before* stopping, because `stoppedHandler` fires for a
+    /// stop this file asked for just as much as for one the system imposed. The recovery
+    /// path must not resurrect an engine on the way out.
+    private func discardEngine() {
+        engine?.stoppedHandler = nil
+        engine?.resetHandler = nil
         engine?.stop()
         engine = nil
+        rumblePlayer = nil
+        isRumbleActive = false
         isEngineRunning = false
+        silenceRun = 0
+        lastRumbleIntensity = -1
     }
 
     func update(settings newSettings: Settings) {
@@ -132,13 +166,12 @@ final class HapticConductor {
             // that spends a few milliseconds restarting.
             engine.stoppedHandler = { [weak self] reason in
                 Task { @MainActor in
-                    self?.log.info("haptic engine stopped (\(reason.rawValue))")
-                    self?.isEngineRunning = false
+                    self?.handleStopped(reason)
                 }
             }
             engine.resetHandler = { [weak self] in
                 Task { @MainActor in
-                    self?.restartAfterReset()
+                    self?.rebuildAfterReset()
                 }
             }
             return engine
@@ -148,18 +181,69 @@ final class HapticConductor {
         }
     }
 
-    private func restartAfterReset() {
+    /// The system stopped the engine. It does that for backgrounding, for a call, and
+    /// when it wants the haptics hardware for something else.
+    ///
+    /// This used to only record the fact, which is why haptics could die and stay dead
+    /// until the next return to the foreground. Recovering here is what heals it. No
+    /// attempt is made to distinguish backgrounding from the rest: a restart while
+    /// suspended simply fails, is throttled, and is retried by `apply` on the next
+    /// frame after the app is back.
+    private func handleStopped(_ reason: CHHapticEngine.StoppedReason) {
+        isEngineRunning = false
+        lastStopDescription = String(describing: reason)
+        log.info("haptic engine stopped (\(String(describing: reason), privacy: .public))")
+        guard settings.isEnabled else { return }
+        restartEngine()
+    }
+
+    /// Brings a stopped engine back on the instance already held.
+    private func restartEngine() {
         guard settings.isEnabled, let engine else { return }
+
+        let now = Date.timeIntervalSinceReferenceDate
+        guard now - lastRestartAttempt >= Self.restartCooldown else { return }
+        lastRestartAttempt = now
+
         do {
             try engine.start()
             isEngineRunning = true
-            isRumbleActive = false
-            rumblePlayer = nil
+            // A new player has to be built: the previous one belonged to the stopped
+            // engine and cannot be resumed. Restoring only the engine and leaving the old
+            // player in place is precisely the half-recovery this is fixing.
             buildRumblePlayer()
-            log.info("haptic engine restarted after reset")
+            restartCount += 1
+            log.info("haptic engine restarted")
         } catch {
             log.error("haptic engine restart failed: \(error.localizedDescription)")
+            isEngineRunning = false
         }
+    }
+
+    /// The media services daemon restarted, which invalidates the engine and every
+    /// player made from it. Apple's guidance is to build a new engine rather than reuse
+    /// the old one.
+    private func rebuildAfterReset() {
+        guard settings.isEnabled else { return }
+        log.info("haptic engine reset; rebuilding")
+        discardEngine()
+        lastRestartAttempt = 0
+        start()
+    }
+
+    /// One line about the haptic engine, for the Settings screen.
+    var diagnostics: String {
+        guard settings.isEnabled else { return "Off" }
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+            return "Unsupported on this hardware"
+        }
+        if isEngineRunning {
+            return restartCount == 0 ? "Running" : "Running · recovered \(restartCount)×"
+        }
+        if let lastStopDescription {
+            return "Stopped · \(lastStopDescription)"
+        }
+        return "Not running"
     }
 
     // MARK: - Continuous rumble
@@ -183,7 +267,16 @@ final class HapticConductor {
             let player = try engine.makeAdvancedPlayer(with: pattern)
             player.loopEnabled = true
             rumblePlayer = player
+            // Reset the modulation state alongside the player.
+            //
+            // Without this, a player is created while `isRumbleActive` still claims the
+            // *previous* one was running, so `updateRumble` only pushes parameters at a
+            // player that was never started. The rumble then stays silent until a quiet
+            // passage parks it and the next loud frame restarts it -- haptics that stop
+            // and then, some while later, start back up.
+            isRumbleActive = false
             lastRumbleIntensity = -1
+            silenceRun = 0
         } catch {
             log.error("could not build rumble player: \(error.localizedDescription)")
         }
@@ -192,8 +285,16 @@ final class HapticConductor {
     /// Feeds one batch of audio analysis into the continuous output and fires
     /// any taps the analysis found.
     func apply(_ frame: TactileFrame) {
-        guard settings.isEnabled, isEngineRunning else { return }
-        guard settings.audioReactive else { return }
+        guard settings.isEnabled, settings.audioReactive else { return }
+
+        // Recovery is attempted here as well as in `stoppedHandler`, because that
+        // handler can fire while the app is on its way to the background, where a
+        // restart cannot succeed -- and nothing else would try again until the next
+        // foreground.
+        guard isEngineRunning else {
+            restartEngine()
+            return
+        }
 
         // Bass dominates the rumble; the upper bands add sharpness rather than
         // intensity, which is what stops a hi-hat from feeling like a kick drum.
@@ -241,6 +342,11 @@ final class HapticConductor {
                 isRumbleActive = true
             } catch {
                 log.error("rumble start failed: \(error.localizedDescription)")
+                // A player that will not start usually means the engine underneath it is
+                // gone. Recovering here is the difference between losing the rumble for
+                // the session and losing it for one frame.
+                isEngineRunning = false
+                restartEngine()
                 return
             }
         }
