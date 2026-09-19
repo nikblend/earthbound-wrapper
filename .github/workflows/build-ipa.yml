@@ -1,0 +1,148 @@
+name: Build IPA
+
+# Produces an unsigned .ipa as a workflow artifact. Signing needs a certificate,
+# which belongs to the person installing the app and not to CI, so the artifact is
+# meant to be handed to Sideloadly, AltStore, or Xcode.
+#
+# A macOS runner is unavoidable: building the core and linking the app both need
+# Xcode's toolchain, and there is no cross-compile story for the iOS SDK.
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - "**/*.md"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_simulator:
+        description: "Also build the simulator slice of the core"
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs on Linux in seconds, and needs neither Xcode nor the emulator core. It
+  # gates the iOS job because these are the pieces that fail silently on a device:
+  # the lock-free ring buffer, the shared input word, and the variadic log shim.
+  glue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the glue tests
+        run: make test
+      - name: Verify the vendored libretro.h
+        run: make verify
+
+  ipa:
+    needs: glue
+    # macos-15 is Apple silicon, which matters: the core is built for arm64, and an
+    # Intel runner would produce a simulator slice the toolchain here cannot use.
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    env:
+      DERIVED_DATA: build/DerivedData
+      APP_PATH: build/DerivedData/Build/Products/Release-iphoneos/EarthboundWrapper.app
+      IPA_PATH: dist/EarthboundWrapper.ipa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report toolchain
+        run: |
+          xcodebuild -version
+          xcode-select -p
+          uname -m
+
+      # The vendored libretro.h is what the Swift constants and the C static
+      # asserts are written against. Checking it against the pinned revision here
+      # means a re-pin that forgets to update the copy fails in CI, with a diff,
+      # rather than as a mystifying runtime bug on someone's phone.
+      - name: Verify the vendored libretro.h matches the pinned core
+        run: ./scripts/verify-core-pin.sh
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate app icon and asset catalog
+        run: python3 scripts/make-assets.py
+
+      - name: Cache the built core
+        id: core-cache
+        uses: actions/cache@v4
+        with:
+          path: Core/lib
+          # Keyed on the pinned revision and the build script, so a change to either
+          # rebuilds. `runner.arch` guards a cache written on a different CPU.
+          key: snes9x-${{ hashFiles('ThirdParty/libretro/CORE_REVISION', 'scripts/build-core.sh') }}-${{ runner.arch }}
+
+      - name: Build the emulator core
+        if: steps.core-cache.outputs.cache-hit != 'true'
+        run: |
+          if [ "${{ inputs.build_simulator }}" = "true" ]; then
+            ./scripts/build-core.sh iphoneos iphonesimulator
+          else
+            ./scripts/build-core.sh iphoneos
+          fi
+          # The simulator slice is only needed for a local run, but a device-only
+          # cache would make a later simulator build fail to link with an error that
+          # looks nothing like the cause.
+          if [ ! -d Core/lib/iphonesimulator ] && [ "${{ inputs.build_simulator }}" != "true" ]; then
+            echo "::notice::device-only build; Core/lib/iphonesimulator was not produced"
+          fi
+
+      - name: Generate the Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Build the app
+        run: |
+          xcodebuild \
+            -project EarthboundWrapper.xcodeproj \
+            -scheme EarthboundWrapper \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+
+      - name: Package the IPA
+        run: ./scripts/package-ipa.sh "$APP_PATH" "$IPA_PATH"
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Earthbound Wrapper"
+            echo
+            echo "- core revision: \`$(cat ThirdParty/libretro/CORE_REVISION)\`"
+            echo "- ipa size: $(du -h "$IPA_PATH" | cut -f1)"
+            echo "- sha256: \`$(shasum -a 256 "$IPA_PATH" | cut -d' ' -f1)\`"
+            echo
+            echo "Install with Sideloadly or AltStore; both will re-sign it with your own Apple ID."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: EarthboundWrapper-unsigned-ipa
+          path: ${{ env.IPA_PATH }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload the dSYM
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: EarthboundWrapper-dSYM
+          path: build/DerivedData/Build/Products/Release-iphoneos/EarthboundWrapper.app.dSYM
+          if-no-files-found: ignore
+          retention-days: 30
