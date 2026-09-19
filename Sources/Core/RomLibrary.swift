@@ -44,6 +44,12 @@ final class RomLibrary {
         acceptedExtensions.contains(url.pathExtension.lowercased())
     }
 
+    /// The accepted extensions written out for a refusal message. Derived from
+    /// `acceptedExtensions` so the message cannot drift from the rule it describes.
+    private static var playableDescription: String {
+        acceptedExtensions.sorted().map { ".\($0)" }.joined(separator: ", ")
+    }
+
     init() {
         refresh()
     }
@@ -74,7 +80,7 @@ final class RomLibrary {
         guard Self.isAccepted(source) else {
             let extensionName = source.pathExtension.isEmpty
                 ? "no file extension" : ".\(source.pathExtension)"
-            importFailure = "\(source.lastPathComponent) has \(extensionName). SNES ROMs are .sfc, .smc, .fig or .swc."
+            importFailure = "\(source.lastPathComponent) has \(extensionName). SNES ROMs are \(Self.playableDescription)."
             return nil
         }
 
@@ -111,7 +117,7 @@ final class RomLibrary {
         }
         // A shared ZIP or a folder is out of scope; say so rather than appearing to
         // do nothing.
-        importFailure = "\(url.lastPathComponent) is not a SNES ROM. Import a .sfc, .smc, .fig or .swc file."
+        importFailure = "\(url.lastPathComponent) is not a SNES ROM. Import \(Self.playableDescription)."
         return nil
     }
 

@@ -146,7 +146,12 @@ targets:
             LSHandlerRank: Owner
             LSItemContentTypes:
               - dev.nikan.earthbound.snes-rom
-        UTImportedTypeDeclarations:
+        # Exported, not imported: this app defines this UTI, and iOS only
+        # associates a file extension with a type whose declaring app claims it
+        # outright. Declared as imported, `.sfc` resolves to this identifier for a
+        # picker while the file on disk keeps a dynamic type, so nothing matches and
+        # every ROM shows up greyed out and unselectable.
+        UTExportedTypeDeclarations:
           - UTTypeIdentifier: dev.nikan.earthbound.snes-rom
             UTTypeDescription: Super Nintendo ROM
             UTTypeConformsTo:

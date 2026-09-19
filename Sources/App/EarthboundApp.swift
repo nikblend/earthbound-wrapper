@@ -214,17 +214,16 @@ struct LibraryScreen: View {
         .background(.bar)
     }
 
-    /// Types the picker will offer.
+    /// Types the picker will offer: everything that is a file.
     ///
-    /// Resolved from extensions rather than from a declared UTI so the picker works
-    /// even on a build where the Info.plist's document types have not been picked up
-    /// by the system yet.
-    private var importableTypes: [UTType] {
-        let resolved = RomLibrary.acceptedExtensions
-            .sorted()
-            .compactMap { UTType(filenameExtension: $0) }
-        // If the system does not know any of these extensions, fall back to
-        // everything rather than to an empty picker.
-        return resolved.isEmpty ? [.data] : resolved
-    }
+    /// Deliberately `[.data]` rather than the ROM extensions. A picker restricted to
+    /// named types greys out any file whose type iOS has not associated with them,
+    /// and `.sfc` has no system type at all -- it exists only because this app
+    /// declares it. Whenever that declaration is not in effect, a filtered picker
+    /// offers nothing the player can tap, which is a dead end that looks like a
+    /// permissions problem and gives no clue what to do about it.
+    ///
+    /// So the picker is a convenience and not the boundary. `RomLibrary.importRom`
+    /// decides whether a file is playable, and says why when it refuses.
+    private var importableTypes: [UTType] { [.data] }
 }
