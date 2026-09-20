@@ -66,6 +66,23 @@ final class AppSettings {
     /// re-pin that changes a default does not silently inherit our stale copy.
     private(set) var coreOptionValues: [String: String] { didSet { persist() } }
 
+    // MARK: - Live changes
+
+    /// Called after any change lands, just before it is written to disk.
+    ///
+    /// A running game subscribes to this so a slider moves the thing it names
+    /// straight away. Without it every value here is read once, when the game is
+    /// built, so a change is only visible on the *next* launch -- which is exactly
+    /// what makes it so confusing to report: the setting is saved correctly and the
+    /// running game simply ignores it.
+    ///
+    /// This is a hook on the change funnel rather than `withObservationTracking`
+    /// because every setting already routes through `persist()` from its `didSet`,
+    /// and `didSet` is the one place guaranteed to run *after* the new value is in
+    /// place. Observation callbacks fire before the write, which is a trap this does
+    /// not need to step into.
+    @ObservationIgnored var onLiveChange: (() -> Void)?
+
     // MARK: - Storage
 
     private static let storageKey = "app.settings.v1"
@@ -90,6 +107,9 @@ final class AppSettings {
     }
 
     private func persist() {
+        // Before the disk write, so a listener sees the change as soon as it is live
+        // rather than after a UserDefaults round trip.
+        onLiveChange?()
         UserDefaults.standard.set([
             "hapticsEnabled": hapticsEnabled,
             "hapticIntensity": hapticIntensity,

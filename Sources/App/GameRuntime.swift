@@ -101,6 +101,7 @@ final class GameRuntime {
 
         conductor.update(settings: settings.hapticSettings)
         conductor.start()
+        startWatchingSettings()
 
         // Drop the preroll that accumulated while the core was loading, so the game
         // does not open by replaying a second of stale audio.
@@ -131,6 +132,12 @@ final class GameRuntime {
         }
         session.stop()
         conductor.stop()
+
+        // Release the settings subscription: the session a change would drive is gone.
+        // Unconditional because one game runs at a time, and a runtime is only built
+        // after the previous one has been shut down, so this can never drop somebody
+        // else's subscription.
+        settings.onLiveChange = nil
     }
 
     func setFastForwarding(_ enabled: Bool) {
@@ -222,14 +229,38 @@ final class GameRuntime {
 
     // MARK: - Settings
 
-    func apply(settings newSettings: AppSettings) {
-        settings = newSettings
-        audio?.volume = Float(newSettings.volume)
-        conductor.update(settings: newSettings.hapticSettings)
-        controls.allowsDiagonals = newSettings.stickDiagonals
-        controls.scale = CGFloat(newSettings.controlScale)
-        gamepad.startFollowsA = newSettings.startFollowsA
+    /// Pushes the player's current settings into everything this runtime already
+    /// owns.
+    ///
+    /// Every value below is otherwise read exactly once, when the runtime is built:
+    /// the sheet's sliders wrote to the settings store, saved correctly, and changed
+    /// nothing about the game in front of them. Haptics kept the feel they were
+    /// started with, the volume slider moved without moving the volume, and control
+    /// size did not resize the controls.
+    ///
+    /// Idempotent, because it is called on every settings mutation rather than on the
+    /// ones that happen to matter.
+    private func applyLiveSettings() {
+        guard !didShutdown else { return }
+        audio?.volume = Float(settings.volume)
+        conductor.update(settings: settings.hapticSettings)
+        controls.allowsDiagonals = settings.stickDiagonals
+        controls.scale = CGFloat(settings.controlScale)
+        gamepad.startFollowsA = settings.startFollowsA
         applyControlFeedback()
+    }
+
+    /// Subscribes this runtime to the settings store.
+    ///
+    /// Deliberately not driven by the draw loop, even though that already runs at
+    /// frame rate: the settings sheet covers the picture while it is open, so the loop
+    /// is exactly the thing that cannot be trusted to keep running while a slider is
+    /// being dragged. A change notifies us instead, which does not care what is on
+    /// screen.
+    private func startWatchingSettings() {
+        settings.onLiveChange = { [weak self] in
+            self?.applyLiveSettings()
+        }
     }
 
     /// Routes the input layer's events into the conductor.

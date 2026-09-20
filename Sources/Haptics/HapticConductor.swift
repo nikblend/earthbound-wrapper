@@ -147,11 +147,19 @@ final class HapticConductor {
 
     func update(settings newSettings: Settings) {
         let wasEnabled = settings.isEnabled
+        let wasAudioReactive = settings.audioReactive
         settings = newSettings
         if !newSettings.isEnabled {
             stop()
         } else if !wasEnabled {
             start()
+        } else if wasAudioReactive && !newSettings.audioReactive {
+            // Park the continuous player here rather than waiting for the next frame.
+            // This is a settings change, and the screen that made it is usually
+            // covering the picture, so there may be no frame to wait for -- and a
+            // rumble left running at the last note's intensity keeps buzzing until
+            // something else happens to stop it.
+            parkRumble()
         }
     }
 
@@ -329,12 +337,10 @@ final class HapticConductor {
         if intensity <= Self.silenceThreshold {
             silenceRun += 1
             if isRumbleActive && silenceRun > Self.silenceBatchesBeforeParking {
-                // Park it. Leaving a player running at zero intensity still
-                // costs, and the restart path below sets its own intensity, so
-                // nothing is lost by not preserving the pattern's position.
-                try? rumblePlayer?.stop(atTime: CHHapticTimeImmediate)
-                isRumbleActive = false
-                lastRumbleIntensity = -1
+                // Leaving a player running at zero intensity still costs, and the
+                // restart path below sets its own intensity, so nothing is lost by not
+                // preserving the pattern's position.
+                parkRumble()
             }
             return
         }
@@ -364,6 +370,21 @@ final class HapticConductor {
         guard abs(intensity - lastRumbleIntensity) > 0.01 else { return }
         try? setRumbleParameters(on: rumblePlayer, intensity: intensity, sharpness: sharpness)
         lastRumbleIntensity = intensity
+    }
+
+    /// Stops the continuous player without touching the engine.
+    ///
+    /// The two callers are the end of a quiet passage and switching the
+    /// soundtrack-reactive path off, and the second is the reason this exists: a player
+    /// parked only by silence would otherwise keep running at whatever intensity the
+    /// last note left it at, so the phone would carry on buzzing after the setting that
+    /// controls it had been turned off.
+    private func parkRumble() {
+        guard isRumbleActive else { return }
+        try? rumblePlayer?.stop(atTime: CHHapticTimeImmediate)
+        isRumbleActive = false
+        lastRumbleIntensity = -1
+        silenceRun = 0
     }
 
     private func setRumbleParameters(on player: CHHapticAdvancedPatternPlayer,
