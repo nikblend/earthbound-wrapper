@@ -112,38 +112,46 @@ struct ControlLayout {
         ]
 
         // --- Shoulders ----------------------------------------------------
-        // Stacked vertically in the margin to the right of the picture, directly above
-        // the face cluster.
+        // Two pills stacked in the right margin, above the face cluster.
         //
-        // That column is the one strip of screen with nothing else in it: an
-        // aspect-correct picture is letterboxed on exactly those two sides, and the face
-        // cluster occupies the bottom of the right-hand one. Stacked here, L and R cover
-        // no game pixels at all, and the thumb reaches them by moving up the column it is
-        // already resting in rather than crossing the lettered bubble.
+        // That margin is the one strip of screen an aspect-correct picture leaves alone,
+        // so it is the only place they can sit without covering the game. What matters is
+        // *which* part of the strip. The face cluster is placed from the trailing edge of
+        // the safe area, and on a notched phone held in landscape that edge is 47-59pt in
+        // from the glass -- so the cluster's own centre, which is what these used to be
+        // aligned to, sits close enough to the picture to straddle its inner edge. A 4:3
+        // picture only leaves about 115pt of bar on a 390pt-tall screen, and the pills are
+        // ~72pt wide, so there is no room to be vague about it.
         //
-        // L is the lower of the two because it is the one that earns its place -- in
-        // EarthBound it is a second A -- and the lower position is the shorter reach. R
-        // rings a bicycle bell.
+        // Their outer edge is therefore flush with the cluster's, which is the same
+        // trailing margin the face buttons are placed from: one margin line for everything
+        // on the right-hand side.
+        //
+        // L is the upper pill and R the lower one. Stacked vertically there is no correct
+        // answer, so this is the player's preference; the stack is kept tight (see `gap`)
+        // because L is the useful one -- in EarthBound it is a second A -- and it is now
+        // the longer reach.
         let shoulderRadius = buttonRadius * 1.3
-        // What `drawPill` actually draws, which is taller than `shoulderRadius * 1.15`
-        // only by accident of the same formula being used for width.
+        // What `drawPill` draws: `shoulderRadius * 2` wide and this tall.
         let pillHeight = shoulderRadius * 1.15
+        let shoulderX = size.width - safeArea.trailing - trailingMargin - shoulderRadius
         let clusterTop = clusterCenter.y - clusterExtent
         let topLimit = safeArea.top + pillHeight * 0.5 + 6
 
         let lowerY = clusterTop - shoulderRadius * 0.4 - pillHeight * 0.5
         // The gap closes before either pill is allowed off the top of the screen, so a
-        // large Control size tightens the stack instead of losing R off the edge.
+        // large Control size tightens the stack instead of losing the upper one off the
+        // edge.
         let room = max(lowerY - pillHeight - topLimit, 0)
         let gap = min(pillHeight * 0.35, room)
         let upperY = lowerY - pillHeight - gap
 
         shoulders = [
             ButtonSlot(button: .l,
-                       center: CGPoint(x: clusterCenter.x, y: lowerY),
+                       center: CGPoint(x: shoulderX, y: upperY),
                        radius: shoulderRadius),
             ButtonSlot(button: .r,
-                       center: CGPoint(x: clusterCenter.x, y: upperY),
+                       center: CGPoint(x: shoulderX, y: lowerY),
                        radius: shoulderRadius),
         ]
     }

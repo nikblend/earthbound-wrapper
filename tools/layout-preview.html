@@ -4,9 +4,23 @@
   controls without building and sideloading.
 
   This is not the app. It re-derives the same numbers that ControlLayout.init and
-  drawPill use, on a canvas, so a placement question ("is L reachable?") can be
-  answered by looking rather than by installing a build. If a value here disagrees
-  with Sources/Input/TouchControls.swift, the Swift is right and this file is stale.
+  drawPill use, on a canvas, so a placement question ("is L inside the black bar?")
+  can be answered by looking rather than by installing a build. If a value here
+  disagrees with Sources/Input/TouchControls.swift, the Swift is right and this
+  file is stale.
+
+  Two spaces, and keeping them apart is the entire point:
+
+    the picture   is drawn by the Metal view, which ignores the safe area, so it is
+                  fitted to the *glass* — full screen.
+    the controls  are laid out inside the safe area, so their space is the screen
+                  minus the notch and home-indicator insets.
+
+  This file used to model neither, which made it 47-59pt more generous on notched
+  phones than the app is: it put the shoulder pills comfortably inside the black bar
+  while the real build had them straddling its inner edge. Insets are now per device
+  below, and the readout prints the one number that settles the question — the gap
+  between the pills' outer edge and the picture.
 
   Open it directly, or from the repo: no build, no dependencies.
 -->
@@ -19,7 +33,7 @@
   body { margin: 0; padding: 20px; background: #111; color: #ddd;
          font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
-  p.note { margin: 0 0 16px; color: #888; max-width: 60ch; }
+  p.note { margin: 0 0 16px; color: #888; max-width: 62ch; }
   .controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
               margin-bottom: 16px; }
   label { display: flex; gap: 8px; align-items: center; color: #aaa; }
@@ -29,23 +43,28 @@
   output { color: #6cf; font-variant-numeric: tabular-nums; }
   .readout { color: #888; font-size: 12px; margin-top: 10px;
              font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .readout b { color: #6cf; font-weight: 600; }
+  .bad b { color: #f88; }
 </style>
 </head>
 <body>
 <h1>Control layout</h1>
 <p class="note">
-  Same formulas as <code>ControlLayout</code>. The grey rectangle is the game picture
-  when it is aspect-correct; <em>Widen</em> pushes it out to the screen edges the way
-  the display setting does, which is the case where controls sit over the game.
+  Same formulas as <code>ControlLayout</code>, in the same two coordinate spaces: the grey
+  rectangle is the game picture fitted to the glass, and the controls are laid out inside
+  the safe area (the notch insets are drawn as the dimmed edges). <em>Widen</em> pushes the
+  picture out to the screen edges the way the display setting does, which is the case where
+  the controls necessarily sit over the game.
 </p>
 
 <div class="controls">
   <label>Device
     <select id="device">
-      <option value="667x375">iPhone SE — 667×375</option>
-      <option value="852x393" selected>iPhone 15/16 — 852×393</option>
-      <option value="956x440">iPhone 16 Pro Max — 956×440</option>
-      <option value="1133x744">iPad mini — 1133×744</option>
+      <option value="se">iPhone SE — 667×375</option>
+      <option value="ip12" selected>iPhone 12 — 844×390</option>
+      <option value="ip15">iPhone 15/16 — 852×393</option>
+      <option value="promax">iPhone 16 Pro Max — 956×440</option>
+      <option value="mini">iPad mini — 1133×744</option>
     </select>
   </label>
   <label>Control size <input id="scale" type="range" min="0.8" max="1.4" step="0.05" value="1.0">
@@ -55,13 +74,28 @@
   <label><input id="pads" type="checkbox" checked> Show hit areas</label>
 </div>
 
-<canvas id="c" width="852" height="393"></canvas>
+<canvas id="c" width="844" height="390"></canvas>
 <div class="readout" id="readout"></div>
 
 <script>
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
+// Landscape logical size, and the insets iOS reports for it in landscape as
+// [left, top, right, bottom]. Approximate for the notched phones (the exact value is
+// what UIKit hands to safeAreaInsets), but the *presence* of a 47-59pt landscape inset
+// is the thing that matters and is not in doubt. iPadOS leaves left and right alone
+// and only reserves the home indicator.
+const DEVICES = {
+  se:     { w: 667,  h: 375, insets: [0,  0, 0,  0] },
+  ip12:   { w: 844,  h: 390, insets: [47, 0, 47, 21] },
+  ip15:   { w: 852,  h: 393, insets: [59, 0, 59, 21] },
+  promax: { w: 956,  h: 440, insets: [62, 0, 62, 21] },
+  mini:   { w: 1133, h: 744, insets: [0,  0, 0,  20] },
+};
+
 // ---- mirrors ControlLayout.init -------------------------------------------
+// Called with the *control* space, which in the app is the safe-area rect, so the
+// insets are already subtracted by the caller and `trailing` here is zero.
 function layout(w, h, scale) {
   const s = clamp(scale, 0.8, 1.4);
 
@@ -80,15 +114,18 @@ function layout(w, h, scale) {
   const cy = h - bottomMargin - extent;
 
   const face = [
-    { b: 'X', x: cx,         y: cy - spread, r },
-    { b: 'Y', x: cx - spread, y: cy,         r },
-    { b: 'A', x: cx + spread, y: cy,         r },
-    { b: 'B', x: cx,         y: cy + spread, r },
+    { b: 'X', x: cx,          y: cy - spread, r },
+    { b: 'Y', x: cx - spread, y: cy,          r },
+    { b: 'A', x: cx + spread, y: cy,          r },
+    { b: 'B', x: cx,          y: cy + spread, r },
   ];
 
-  // Shoulders: stacked in the right margin, above the cluster
+  // Shoulders: stacked above the cluster, outer edge flush with the cluster's own.
+  // Both are placed from the same trailing margin, which is what keeps them on the
+  // picture's side of the letterbox rather than straddling it.
   const sr = r * 1.3;
   const pillH = sr * 1.15;
+  const sx = w - trailingMargin - sr;
   const clusterTop = cy - extent;
   const topLimit = pillH * 0.5 + 6;
   const lowerY = clusterTop - sr * 0.4 - pillH * 0.5;
@@ -96,21 +133,26 @@ function layout(w, h, scale) {
   const gap = Math.min(pillH * 0.35, room);
   const upperY = lowerY - pillH - gap;
   const shoulders = [
-    { b: 'L', x: cx, y: lowerY, r: sr },
-    { b: 'R', x: cx, y: upperY, r: sr },
+    { b: 'L', x: sx, y: upperY, r: sr },
+    { b: 'R', x: sx, y: lowerY, r: sr },
   ];
 
   return { w, h, scale: s, wellRadius, nubRadius, face, shoulders, spread, r,
-           pillH, clusterTop, cx, cy, extent, lowerY, upperY, gap };
+           pillH, sx, clusterTop, cx, cy, extent, lowerY, upperY, gap };
 }
 
 // ---- picture rect, mirroring the renderer ---------------------------------
 // A SNES frame is 4:3. "Fit" letterboxes it to the screen height; stretch
 // interpolates from that out to the full width, as DisplaySettings.stretch does.
+//
+// `y` is explicit rather than implied: it used to be omitted, and since the drawing
+// code reads `P.y`, every fill was silently NaN — which `fillRect` ignores without
+// complaining. The picture was never drawn at all, so the diagram showed controls
+// floating on black while its readout confidently printed a picture rect.
 function picture(w, h, stretch) {
   const native = Math.min(w, h * 4 / 3);
   const width = native + (w - native) * stretch;
-  return { x: (w - width) / 2, width, height: h };
+  return { x: (w - width) / 2, y: 0, width, height: h };
 }
 
 // ---- drawing ---------------------------------------------------------------
@@ -147,33 +189,43 @@ function drawPill(x, y, radius, height, fill, stroke, label) {
 }
 
 function render() {
-  const [dw, dh] = document.getElementById('device').value.split('x').map(Number);
+  const D = DEVICES[document.getElementById('device').value];
   const scale = parseFloat(document.getElementById('scale').value);
   const stretch = parseFloat(document.getElementById('stretch').value);
   const showPads = document.getElementById('pads').checked;
 
   document.getElementById('scaleOut').textContent = Math.round(scale * 100) + '%';
   document.getElementById('stretchOut').textContent = Math.round(stretch * 100) + '%';
-  c.width = dw; c.height = dh;
-  c.style.width = dw + 'px';
-  c.style.height = dh + 'px';
 
-  const L = layout(dw, dh, scale);
-  const P = picture(dw, dh, stretch);
+  const [dl, dt, dr, db] = D.insets;
+  // The control space: the safe-area rect the overlay is laid out in.
+  const cw = D.w - dl - dr;
+  const ch = D.h - dt - db;
 
-  ctx.clearRect(0, 0, dw, dh);
+  c.width = D.w; c.height = D.h;
+  c.style.width = D.w + 'px';
+  c.style.height = D.h + 'px';
+
+  const L = layout(cw, ch, scale);
+  const P = picture(D.w, D.h, stretch);
+
+  ctx.clearRect(0, 0, D.w, D.h);
   ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, dw, dh);
+  ctx.fillRect(0, 0, D.w, D.h);
 
-  // The game picture.
+  // The game picture, in glass space.
   ctx.fillStyle = 'rgba(120,150,190,.16)';
   ctx.fillRect(P.x, P.y, P.width, P.height);
   ctx.strokeStyle = 'rgba(140,180,230,.35)';
   ctx.lineWidth = 1;
   ctx.strokeRect(P.x + .5, P.y + .5, P.width - 1, P.height - 1);
 
+  // Everything below here is in control space.
+  ctx.save();
+  ctx.translate(dl, dt);
+
   // Stick, at rest, as a hint.
-  const stick = { x: dw * 0.16, y: dh * 0.70 };
+  const stick = { x: cw * 0.16, y: ch * 0.70 };
   drawRing(stick.x, stick.y, L.wellRadius, 'rgba(255,255,255,.10)', 'rgba(255,255,255,.22)');
   drawRing(stick.x, stick.y, L.nubRadius, 'rgba(255,255,255,.55)', 'rgba(255,255,255,.9)');
 
@@ -235,13 +287,41 @@ function render() {
   drawPill(64 + 66 + 8 + 22, 28, 22, 40, 'rgba(0,0,0,.35)', null, null);
   ctx.fillText('4x', 64 + 66 + 8 + 22, 28);
 
+  ctx.restore();
+
+  // The insets, so the space the controls are laid out in is visible.
+  ctx.strokeStyle = 'rgba(255,255,255,.10)';
+  ctx.setLineDash([2, 4]);
+  if (dl) { ctx.beginPath(); ctx.moveTo(dl, 0); ctx.lineTo(dl, D.h); ctx.stroke(); }
+  if (dr) { ctx.beginPath(); ctx.moveTo(D.w - dr, 0); ctx.lineTo(D.w - dr, D.h); ctx.stroke(); }
+  if (db) { ctx.beginPath(); ctx.moveTo(0, D.h - db); ctx.lineTo(D.w, D.h - db); ctx.stroke(); }
+  ctx.setLineDash([]);
+
+  // The number that settles it: how far the pills sit inside, or over, the picture.
+  // Both spaces meet here, so the offset is added back.
+  const pillLeft = dl + L.sx - L.shoulders[0].r;
+  const pillRight = dl + L.sx + L.shoulders[0].r;
+  const pictureRight = P.x + P.width;
+  const clearance = pillLeft - pictureRight;
+  const lowerIsR = L.shoulders[1].b === 'R';
   const gapToPad = (L.clusterTop - (L.lowerY + L.pillH / 2)).toFixed(1);
-  document.getElementById('readout').textContent =
+  const bar = stretch < 0.999
+    ? `picture ${P.x.toFixed(0)}..${pictureRight.toFixed(0)}`
+    : 'picture fills the screen';
+
+  const readout = document.getElementById('readout');
+  readout.className = 'readout' + (clearance < 0 ? ' bad' : '');
+  readout.innerHTML =
     `button Ø ${(2 * L.r).toFixed(1)}pt   spread ${L.spread.toFixed(1)}   ` +
     `cluster ${L.extent.toFixed(1)} from corner   ` +
-    `L/R pill ${((L.shoulders[0].r) * 2).toFixed(1)}×${L.pillH.toFixed(1)}   ` +
-    `L→pad gap ${gapToPad}pt   R top ${(L.upperY - L.pillH / 2).toFixed(1)}pt   ` +
-    `picture x ${P.x.toFixed(0)}..${(P.x + P.width).toFixed(0)}`;
+    `pill ${((L.shoulders[0].r) * 2).toFixed(1)}×${L.pillH.toFixed(1)}   ` +
+    `pills x ${pillLeft.toFixed(0)}..${pillRight.toFixed(0)}   ` +
+    `${bar}<br>` +
+    `inner pill ${lowerIsR ? 'R' : 'L'}→pad gap ${gapToPad}pt   ` +
+    `upper pill top ${(L.upperY - L.pillH / 2).toFixed(1)}pt   ` +
+    `insets L${dl} T${dt} R${dr} B${db}   ` +
+    `clearance from picture <b>${clearance >= 0 ? '+' : ''}${clearance.toFixed(1)}pt</b> ` +
+    `<span style="color:#888">${clearance >= 0 ? '(inside the bar)' : '(over the picture)'}</span>`;
 }
 
 ['device', 'scale', 'stretch', 'pads'].forEach(id =>
