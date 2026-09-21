@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build and run the glue tests
         run: make test
       - name: Verify the vendored libretro.h
@@ -56,7 +56,7 @@ jobs:
       IPA_PATH: dist/EarthboundWrapper.ipa
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Report toolchain
         run: |
