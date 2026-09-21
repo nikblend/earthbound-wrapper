@@ -79,7 +79,7 @@ jobs:
 
       - name: Cache the built core
         id: core-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: Core/lib
           # Keyed on the pinned revision and the build script, so a change to either
